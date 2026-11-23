@@ -195,6 +195,27 @@ table.items td.val { font-family: Consolas, monospace; font-size: 12px; max-widt
 .key.is-folder { border-style: double; border-width: 3px; }
 .kf-badge { position: absolute; top: 5px; right: 7px; font-size: 10.5px; padding: 1px 6px; border-radius: 8px; background: rgba(0, 0, 0, .4); color: #e6edf3; white-space: nowrap; }
 .kf-badge.in { right: auto; left: 7px; background: transparent; padding: 0; opacity: .8; }
+.seg-tabs { display: inline-flex; gap: 2px; padding: 3px; margin: 0 0 14px; border-radius: 11px; background: var(--panel-2, #161b22); border: 1px solid var(--line, #22262e); }
+.seg-tabs button { height: 34px; padding: 0 16px; border: none; border-radius: 8px; background: transparent; color: var(--muted, #8b949e); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.seg-tabs button.on { background: var(--accent, #2dd4bf); color: #04231f; }
+/* the folder view: tree, contents, properties */
+.fv { display: grid; grid-template-columns: 260px minmax(0, 1fr) 300px; gap: 14px; align-items: start; }
+.fv-pane { background: var(--panel, #11161d); border: 1px solid var(--line, #22262e); border-radius: 14px; padding: 12px; min-width: 0; }
+.fv-cap { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted, #8b949e); margin: 2px 4px 8px; }
+.fv-node { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 0 8px; border: none; border-radius: 9px; background: transparent; color: inherit; font: inherit; font-size: 14px; text-align: start; cursor: pointer; }
+.fv-node:hover { background: rgba(255, 255, 255, .04); }
+.fv-node.on { background: color-mix(in srgb, var(--accent, #2dd4bf) 16%, transparent); box-shadow: inset 2px 0 0 var(--accent, #2dd4bf); }
+.fv-node .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fv-chip { flex: none; width: 28px; height: 28px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; font-size: 15px; }
+.fv-n { font-size: 12px; color: var(--muted, #8b949e); }
+.fv-auto { font-size: 10px; padding: 1px 6px; border-radius: 6px; background: #5865f2; color: #fff; }
+.fv-row { display: flex; align-items: center; gap: 8px; min-height: 50px; padding: 4px 8px; margin-bottom: 6px; border-radius: 10px; background: rgba(255, 255, 255, .03); border: 1px solid var(--line, #22262e); }
+.fv-row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14.5px; }
+.fv-row .kd { width: 96px; font-size: 12px; color: var(--muted, #8b949e); }
+.fv-row select { width: 130px; }
+.fv-head { display: flex; align-items: center; gap: 10px; margin: 0 2px 10px; }
+.fv-head h3 { margin: 0; font-size: 18px; }
+@media (max-width: 1100px) { .fv { grid-template-columns: 1fr; } }
 .key.add { background: transparent; color: var(--muted); border: 2px dashed var(--line); }
 .key.dragging { opacity: .35; }
 .key.over { outline: 2px dashed var(--accent); outline-offset: 2px; }
@@ -522,8 +543,12 @@ nav a.on::before { color: var(--accent); }
     <section id="shortcuts">
       <h2 data-i18n="s.nav.shortcuts">Shortcuts</h2>
       <p class="lead" data-i18n="s.shortcuts.lead">The keys shown by Shortcut grid and Big button widgets. Click a key to edit it, drag to reorder. The phone only sends the key's id; commands never leave this computer.</p>
-      <div class="deck" id="deck"></div>
-      <div class="card editor" id="editor"></div>
+      <div class="seg-tabs" id="skTabs"><button type="button" class="on" data-v="keys">Keys</button><button type="button" data-v="folders">Folders</button></div>
+      <div id="skKeys">
+        <div class="deck" id="deck"></div>
+        <div class="card editor" id="editor"></div>
+      </div>
+      <div id="skFolders" class="fv" hidden></div>
     </section>
 
     <section id="rules">
@@ -2779,6 +2804,10 @@ function renderDeck() {
   });
   deck.append(h('div', { class: 'key add', onclick: addShortcut }, h('span', { class: 'ki' }, icon('plus')), h('span', { class: 'kl' }, t('s.k.newShortcut'))));
   renderEditor();
+  // the Keys / Folders switch speaks the interface language, which is applied after the page loads
+  $('skTabs').querySelector('[data-v="keys"]').textContent = tl('Keys');
+  $('skTabs').querySelector('[data-v="folders"]').textContent = tl('Folders');
+  renderFolders();
 }
 
 function addShortcut() {
@@ -3029,6 +3058,127 @@ function delKey() {
   selKey = Math.max(0, selKey - 1);
   renderDeck(); changed();
 }
+// ---------------------------------------------------------------- shortcut folders: tree, contents, properties (local tweak)
+// The same shortcuts as the Keys view, arranged by folder. "Outside folders" is what a grid showing all keys shows.
+let fvSel = '';            // '' = outside folders, else the id of the selected folder
+const newId = (p) => p + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+const fvKey = (id) => cfg.shortcuts.find((s) => s.id === id);
+const fvLoose = () => { const inside = new Set(cfg.shortcuts.flatMap((s) => (isFolder(s) ? s.items || [] : []))); return cfg.shortcuts.filter((s) => s.id && !inside.has(s.id)); };
+function showSkView(v) {
+  $('skTabs').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
+  $('skKeys').hidden = v !== 'keys';
+  $('skFolders').hidden = v !== 'folders';
+  if (v === 'folders') renderFolders(); else renderDeck();
+}
+function editKey(id) {
+  const i = cfg.shortcuts.findIndex((s) => s.id === id);
+  if (i < 0) return;
+  selKey = i; showSkView('keys');
+  $('editor').scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+function renderFolders() {
+  const root = $('skFolders');
+  if (root.hidden) return;
+  if (fvSel && !(fvKey(fvSel) && isFolder(fvKey(fvSel)))) fvSel = '';
+  const cur = fvSel ? fvKey(fvSel) : null;
+  const chip = (s) => { const c = h('span', { class: 'fv-chip' }, rich(s.icon || (isFolder(s) ? '📁' : '•'))); c.style.background = s.color || '#6b7280'; return c; };
+
+  // tree: "outside folders", then every folder under the folders that hold it (a folder in two places shows twice)
+  const tree = h('div', { class: 'fv-pane' }, h('div', { class: 'fv-cap' }, tl('Folders')));
+  const outside = h('button', { class: 'fv-node' + (fvSel === '' ? ' on' : ''), type: 'button', onclick: () => { fvSel = ''; renderFolders(); } },
+    h('span', { class: 'fv-chip', style: { background: 'var(--accent, #2dd4bf)' } }, rich('🏠')), h('span', { class: 'nm' }, tl('Outside folders')), h('span', { class: 'fv-n' }, String(fvLoose().length)));
+  tree.append(outside);
+  const walk = (f, depth, trail) => {
+    const n = h('button', { class: 'fv-node' + (f.id === fvSel ? ' on' : ''), type: 'button', onclick: () => { fvSel = f.id; renderFolders(); } },
+      chip(f), h('span', { class: 'nm' }, f.label || f.id), f.app ? h('span', { class: 'fv-auto' }, tl('AUTO')) : null, h('span', { class: 'fv-n' }, String((f.items || []).length)));
+    n.style.paddingLeft = (8 + depth * 18) + 'px';
+    tree.append(n);
+    for (const id of f.items || []) { const k = fvKey(id); if (k && isFolder(k) && !trail.has(k.id)) walk(k, depth + 1, new Set([...trail, k.id])); }
+  };
+  fvLoose().filter(isFolder).forEach((f) => walk(f, 1, new Set([f.id])));
+  tree.append(h('button', { class: 'btn sm', type: 'button', style: { marginTop: '10px', width: '100%' }, onclick: () => {
+    const f = { id: newId('folder'), label: tl('New folder'), icon: '📁', color: '#a855f7', cmd: 'builtin:folder', items: [] };
+    cfg.shortcuts.push(f);
+    if (cur) cur.items = [...(cur.items || []), f.id];
+    fvSel = f.id; changed(); renderFolders();
+  } }, '+ ' + (cur ? tl('New folder inside') + ' «' + (cur.label || '') + '»' : tl('New folder'))));
+
+  // contents of the selected folder (or the keys outside folders)
+  const list = cur ? (cur.items || []).map(fvKey).filter(Boolean) : fvLoose();
+  const targets = cfg.shortcuts.filter((f) => isFolder(f) && f !== cur);
+  const mid = h('div', { class: 'fv-pane' }, h('div', { class: 'fv-head' },
+    h('h3', {}, cur ? (cur.label || cur.id) : tl('Outside folders')), h('span', { class: 'fv-n' }, list.length + ' ' + tl('items')),
+    h('button', { class: 'btn sm', type: 'button', style: { marginLeft: 'auto' }, onclick: () => {
+      const s = { id: newId('key'), label: t('s.k.newShortcut'), icon: '⭐', color: '#0ea5e9', cmd: '' };
+      cfg.shortcuts.push(s);
+      if (cur) cur.items = [...(cur.items || []), s.id];
+      changed(); editKey(s.id);
+    } }, '+ ' + tl('Key'))));
+  if (!cur) mid.append(h('p', { class: 'hint', style: { margin: '0 4px 10px' } }, tl('These are the keys a grid showing all keys shows. Keys put into a folder leave this list.')));
+  list.forEach((s, i) => {
+    const kind = isFolder(s) ? tl('Folder') + ' · ' + (s.items || []).length : (KINDS()[kindOf(s)] || '');
+    const move = h('select', { 'aria-label': tl('Move to folder'), onchange: (e) => {
+      const to = fvKey(e.target.value); if (!to) return;
+      if (isFolder(s) && folderDescendants(s).has(to.id)) { toast(tl('A folder cannot go inside itself'), true); renderFolders(); return; }
+      if (cur) cur.items = cur.items.filter((x) => x !== s.id);
+      if (!(to.items || []).includes(s.id)) to.items = [...(to.items || []), s.id];
+      changed(); renderFolders();
+    } }, h('option', { value: '' }, tl('Move to…')), ...targets.filter((f) => f.id !== s.id).map((f) => h('option', { value: f.id }, (f.label || f.id))));
+    const swap = (d) => () => { const a = cur.items, j = a.indexOf(s.id), k = j + d; if (k < 0 || k >= a.length) return; [a[j], a[k]] = [a[k], a[j]]; changed(); renderFolders(); };
+    mid.append(h('div', { class: 'fv-row' }, chip(s), h('span', { class: 'nm' }, s.label || s.id), h('span', { class: 'kd' }, kind),
+      cur ? h('button', { class: 'btn sm', type: 'button', disabled: i === 0, 'aria-label': t('s.js.earlier'), onclick: swap(-1) }, '↑') : null,
+      cur ? h('button', { class: 'btn sm', type: 'button', disabled: i === list.length - 1, 'aria-label': t('s.js.later'), onclick: swap(1) }, '↓') : null,
+      move,
+      isFolder(s) ? h('button', { class: 'btn sm', type: 'button', onclick: () => { fvSel = s.id; renderFolders(); } }, tl('Open'))
+        : h('button', { class: 'btn sm', type: 'button', onclick: () => editKey(s.id) }, tl('Edit')),
+      cur ? h('button', { class: 'btn sm', type: 'button', title: tl('Take out of the folder'), onclick: () => { cur.items = cur.items.filter((x) => x !== s.id); changed(); renderFolders(); } }, tl('Take out')) : null,
+      h('button', { class: 'btn sm danger', type: 'button', onclick: () => {
+        if (!confirm(tl('Delete') + ' "' + (s.label || s.id) + '"?')) return;
+        cfg.shortcuts = cfg.shortcuts.filter((o) => o !== s);
+        for (const o of cfg.shortcuts) { if (Array.isArray(o.items)) o.items = o.items.filter((x) => x !== s.id); if (Array.isArray(o.cycle)) o.cycle = o.cycle.filter((x) => x !== s.id); }
+        selKey = Math.min(selKey, cfg.shortcuts.length - 1);
+        changed(); renderFolders();
+      } }, tl('Delete'))));
+  });
+  if (!list.length) mid.append(h('p', { class: 'hint', style: { margin: '4px' } }, tl('Empty: add a key, or move keys here from another folder.')));
+
+  // properties of the selected folder
+  const side = h('div', { class: 'fv-pane' });
+  if (!cur) {
+    side.append(h('div', { class: 'fv-cap' }, tl('Folder')), h('p', { class: 'hint', style: { margin: '0 4px' } }, tl('Pick a folder on the left to name it, colour it or make it smart. Which way a grid opens folders, and when it goes back to the start, is set on the Shortcut grid widget.')));
+  } else {
+    const upd = (k, v) => { cur[k] = v; changed(); };
+    const name = h('input', { type: 'text', value: cur.label || '', oninput: (e) => { upd('label', e.target.value); renderFoldersSoon(); } });
+    const ico = h('input', { type: 'text', class: 'icon-input', maxlength: 8, value: cur.icon || '', oninput: (e) => { upd('icon', e.target.value); renderFoldersSoon(); } });
+    const sw = h('div', { class: 'swatches' }, ...COLORS.map((c) => h('button', { type: 'button', title: c, class: c === cur.color ? 'on' : '', style: { background: c }, onclick: () => { upd('color', c); renderFolders(); } })));
+    const app = h('input', { type: 'text', value: cur.app || '', placeholder: 'Discord.exe', oninput: (e) => { upd('app', e.target.value.trim() || null); renderFoldersSoon(); } });
+    side.append(h('div', { class: 'fv-cap' }, tl('Folder')),
+      h('div', { class: 'field' }, h('label', {}, t('s.k.label')), name),
+      h('div', { class: 'field' }, h('label', {}, t('s.z.iconEmoji')), ico),
+      h('div', { class: 'field' }, h('label', {}, t('s.z.colour')), sw),
+      h('div', { class: 'field' }, h('label', {}, tl('Smart folder: open by itself while this app is in front on the PC')), app,
+        h('span', { class: 'hint' }, tl('The program name as Task Manager shows it, e.g. Discord.exe or obs64.exe. Leave empty for an ordinary folder.'))),
+      h('button', { class: 'btn sm danger', type: 'button', onclick: () => {
+        if (!confirm(tl('Delete the folder? Its keys stay.'))) return;
+        cfg.shortcuts = cfg.shortcuts.filter((o) => o !== cur);
+        for (const o of cfg.shortcuts) if (Array.isArray(o.items)) o.items = o.items.filter((x) => x !== cur.id);
+        fvSel = ''; selKey = Math.min(selKey, cfg.shortcuts.length - 1); changed(); renderFolders();
+      } }, tl('Delete the folder')));
+  }
+  root.replaceChildren(tree, mid, side);
+}
+// typing in a name: redraw once the typing pauses, so the field keeps its focus and caret
+let fvTimer = 0;
+function renderFoldersSoon() {
+  clearTimeout(fvTimer);
+  fvTimer = setTimeout(() => {
+    const a = document.activeElement, pos = a && a.selectionStart, ph = a && a.closest('#skFolders') ? [...$('skFolders').querySelectorAll('input')].indexOf(a) : -1;
+    renderFolders();
+    if (ph >= 0) { const n = $('skFolders').querySelectorAll('input')[ph]; if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (_) {} } }
+  }, 500);
+}
+$('skTabs').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => showSkView(b.dataset.v)));
+
 async function testKey() {
   const s = cfg.shortcuts[selKey];
   const r = await fetch('/api/shortcuts/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) });
