@@ -555,6 +555,8 @@ object State(IServiceProvider sp, long? ev)
         obs = sp.GetRequiredService<ObsMonitor>().Snapshot() is { Connected: true } o ? new { o.Streaming, o.Recording, o.RecordPaused } : null,
         toggles = Shortcuts.States(sp.GetRequiredService<ConfigStore>().Get(), push, sp.GetRequiredService<AudioControl>()),
         cycles = Shortcuts.CycleStates(sp.GetRequiredService<ConfigStore>().Get()),
+        // the app in front, only while a smart folder waits for one
+        front = sp.GetRequiredService<ConfigStore>().Get().Shortcuts.Any(s => s.Cmd == "builtin:folder" && s.App is not null) ? FrontWindow.App() : null,
     };
 }
 

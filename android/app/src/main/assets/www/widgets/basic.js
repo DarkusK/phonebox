@@ -918,22 +918,175 @@ function applyCycles(root) {
   });
 }
 
+// local tweak: folders in the shortcut grid. A folder is a shortcut (builtin:folder) holding other keys and folders; the
+// grid shows it as a key and opens it one of three ways (o.folderView): "drill" replaces the grid with the folder and a
+// Back key (with the path on top), "popup" opens it in a window over the page, "tabs" shows the grid's folders as tabs.
+// A smart folder (s.app) opens by itself while its app is in front on the PC; tapping around takes over until the app
+// changes. Without a touch for o.autoHome seconds the grid goes back to where it started.
+const fL = (en, ru) => (String(LOCALE || '').toLowerCase().startsWith('ru') ? ru : en);
+const appName = (a) => String(a || '').trim().toLowerCase().replace(/\.exe$/, '');
+
 W.shortcuts = {
   needs: ['state'],
   create(box, { o }) {
-    const all = cfg.shortcuts || [];
+    // the agent sends a folder's keys as `folder`; the settings preview passes its unsaved config (cmd + items) as it is
+    const all = (cfg.shortcuts || []).map((s) => (s.folder || s.cmd !== 'builtin:folder' ? s : { ...s, folder: s.items || [] }));
+    const byId = new Map(all.map((s) => [s.id, s]));
+    const inside = new Set(all.flatMap((s) => s.folder || []));
     const ids = Array.isArray(o.ids) && o.ids.length ? o.ids : null;
-    const list = ids ? ids.map((id) => all.find((s) => s.id === id)).filter(Boolean) : all;
-    if (!list.length) {
+    // "all" means the keys that are not inside a folder: the rest are reached through their folders
+    const rootList = ids ? ids.map((id) => byId.get(id)).filter(Boolean) : all.filter((s) => !inside.has(s.id));
+    if (!rootList.length) {
       box.append(h('div', 'empty', all.length ? t('w.shortcutsMissing') : t('w.shortcutsWait')));
       return {};
     }
+    const view = ['popup', 'tabs'].includes(o.folderView) ? o.folderView : 'drill';
     const cols = Math.min(8, Math.max(1, o.columns || 4));
-    const grid = h('div', 'deck-grid', ...list.map(keyButton));
-    grid.style.gridTemplateColumns = `repeat(${Math.min(cols, list.length)}, 1fr)`;
-    grid.style.gridTemplateRows = `repeat(${Math.ceil(list.length / cols)}, 1fr)`;
-    box.append(grid);
-    return { update: () => applyToggles(box) };
+    const kids = (f) => (f.folder || []).map((id) => byId.get(id)).filter(Boolean);
+    const folders = all.filter((s) => s.folder);
+    let path = [];            // open folders, outermost first
+    let tab = null;           // tabs view: the folder whose tab is open ('' = the keys outside folders)
+    let auto = null;          // the smart folder opened by itself, while it is still the one showing
+    let lastFront = null;
+    let idle = 0;
+
+    const folderKey = (f, open) => {
+      const minis = kids(f).slice(0, 4).map((k) => h('span', 'kf-m', k.folder ? icon('folder') : (k.icon ? rich(k.icon) : '•')));
+      const b = h('button', 'key k-folder', h('span', 'kf-grid', ...minis), h('span', 'k-label', f.label), h('b', 'kf-n', String(kids(f).length)),
+        f.app ? h('i', 'kf-auto', fL('AUTO', 'АВТО')) : '');
+      b.style.setProperty('--k', f.color || '#6b7280');
+      b.dataset.id = f.id;
+      b.addEventListener('click', () => { haptic(); open(f.id); });
+      return b;
+    };
+    const backKey = (go) => {
+      const b = h('button', 'key k-back', h('span', 'k-icon', icon('arrow-left')), h('span', 'k-label', fL('Back', 'Назад')));
+      b.addEventListener('click', () => { haptic(); go(); });
+      return b;
+    };
+    const keyFor = (s, open) => (s.folder ? folderKey(s, open) : keyButton(s));
+    const gridOf = (keys) => {
+      const g = h('div', 'deck-grid', ...keys);
+      const n = Math.max(1, keys.length);
+      g.style.gridTemplateColumns = `repeat(${Math.min(cols, n)}, 1fr)`;
+      g.style.gridTemplateRows = `repeat(${Math.ceil(n / cols)}, 1fr)`;
+      return g;
+    };
+    const openIn = (p) => (id) => { auto = null; path = [...p, id]; render(); };
+
+    // popup: one window over the whole page, closed by a tap beside it
+    let pop = null;
+    const closePop = () => { if (pop) { pop.remove(); pop = null; } };
+    const renderPop = () => {
+      if (!path.length) { closePop(); return; }
+      const f = byId.get(path[path.length - 1]);
+      if (!f) { path = []; closePop(); return; }
+      if (!pop) {
+        pop = h('div', 'kf-pop');
+        pop.addEventListener('click', (e) => { if (e.target === pop) { haptic(); auto = null; path = []; render(); } });
+        pop.addEventListener('pointerdown', () => touched());
+        document.body.appendChild(pop);
+      }
+      const close = labelled(h('button', 'kf-x', icon('x')), fL('Close', 'Закрыть'));
+      close.addEventListener('click', () => { haptic(); auto = null; path = []; render(); });
+      const up = path.length > 1 ? labelled(h('button', 'kf-x', icon('arrow-left')), fL('Back', 'Назад')) : null;
+      if (up) up.addEventListener('click', () => { haptic(); auto = null; path = path.slice(0, -1); render(); });
+      const win = h('div', 'kf-win', h('div', 'kf-head', up, h('i', 'kf-dot'), h('b', null, f.label),
+        h('span', 'kf-sub', f.app ? fL('opens by itself in ', 'открывается сама в ') + f.app : ''), close), gridOf(kids(f).map((s) => keyFor(s, openIn(path)))));
+      win.querySelector('.kf-dot').style.background = f.color || '#6b7280';
+      pop.replaceChildren(win);
+      applyToggles(pop);
+    };
+
+    const crumbs = (base) => {
+      const parts = [h('button', 'kf-c', base)];
+      parts[0].addEventListener('click', () => { haptic(); auto = null; path = []; render(); });
+      path.forEach((id, i) => {
+        const c = h('button', 'kf-c' + (i === path.length - 1 ? ' on' : ''), byId.get(id)?.label || '');
+        c.addEventListener('click', () => { haptic(); auto = null; path = path.slice(0, i + 1); render(); });
+        parts.push(h('span', 'kf-sep', '›'), c);
+      });
+      return parts;
+    };
+    const autoNote = () => (auto ? h('span', 'kf-autonote', icon('zap'), fL('Opened by itself: ', 'Открыто само: ') + (byId.get(auto)?.app || '')) : '');
+
+    const render = () => {
+      const kids0 = [];
+      if (view === 'tabs') {
+        const tabFolders = rootList.filter((s) => s.folder);
+        const loose = rootList.filter((s) => !s.folder);
+        const tabs = [...(loose.length ? [{ id: '', label: fL('Keys', 'Ярлыки'), color: '#9aa0ad', n: loose.length }] : []),
+          ...tabFolders.map((f) => ({ id: f.id, label: f.label, color: f.color, n: kids(f).length, app: f.app }))];
+        if (tab === null || !tabs.some((x) => x.id === tab)) tab = tabs[0]?.id ?? '';
+        kids0.push(h('div', 'kf-tabs', ...tabs.map((x) => {
+          const b = h('button', 'kf-tab' + (x.id === tab ? ' on' : ''), h('i', 'kf-dot'), h('span', null, x.label), h('small', null, String(x.n)));
+          b.querySelector('.kf-dot').style.background = x.color || '#6b7280';
+          if (x.id === tab) b.style.setProperty('--k', x.color || '#6b7280');
+          b.addEventListener('click', () => { haptic(); auto = null; tab = x.id; path = []; render(); });
+          return b;
+        })));
+        const base = tab ? kids(byId.get(tab)) : loose;
+        const cur = path.length ? byId.get(path[path.length - 1]) : null;
+        const keys = cur ? [backKey(() => { auto = null; path = path.slice(0, -1); render(); }), ...kids(cur).map((s) => keyFor(s, openIn(path)))]
+          : base.map((s) => keyFor(s, openIn([])));
+        if (auto) kids0.push(h('div', 'kf-bar', autoNote()));
+        kids0.push(gridOf(keys));
+      } else if (view === 'popup') {
+        kids0.push(gridOf(rootList.map((s) => keyFor(s, openIn([])))));
+        renderPop();
+      } else {
+        const cur = path.length ? byId.get(path[path.length - 1]) : null;
+        if (path.length && !cur) path = [];
+        if (cur) kids0.push(h('div', 'kf-bar', ...crumbs(fL('Keys', 'Ярлыки')), autoNote()));
+        const keys = cur ? [backKey(() => { auto = null; path = path.slice(0, -1); render(); }), ...kids(cur).map((s) => keyFor(s, openIn(path)))]
+          : rootList.map((s) => keyFor(s, openIn([])));
+        kids0.push(gridOf(keys));
+      }
+      box.replaceChildren(...kids0);
+      box.classList.toggle('kf-has-bar', !!box.querySelector('.kf-bar, .kf-tabs'));
+      applyToggles(box);
+    };
+
+    // where a folder sits in this grid: the folders to open, outermost first
+    const pathTo = (id) => {
+      const seen = new Set(), queue = rootList.filter((s) => s.folder).map((f) => [f.id]);
+      while (queue.length) {
+        const p = queue.shift(), last = p[p.length - 1];
+        if (last === id) return p;
+        if (seen.has(last)) continue;
+        seen.add(last);
+        for (const k of kids(byId.get(last))) if (k.folder) queue.push([...p, k.id]);
+      }
+      return [id];
+    };
+    const smart = () => {
+      const front = appName(D.state?.front);
+      if (front === lastFront) return;
+      lastFront = front;
+      const f = front ? folders.find((x) => x.app && appName(x.app) === front) : null;
+      if (f) {
+        const p = pathTo(f.id);
+        if (view === 'tabs' && rootList.some((s) => s.id === p[0])) { tab = p[0]; path = p.slice(1); } else path = p;
+        auto = f.id;
+        render();
+      } else if (auto) {
+        // the app left the front: back to where the grid starts, unless the user went somewhere else meanwhile
+        auto = null; path = []; render();
+      }
+    };
+    // nobody touched the grid for a while: back to its start (not while a smart folder holds it open)
+    const homeAfter = Number.isFinite(+o.autoHome) ? Math.max(0, +o.autoHome) : 30;
+    const touched = () => {
+      clearTimeout(idle);
+      if (homeAfter) idle = setTimeout(() => { if (!auto && (path.length || (view === 'tabs' && tab !== null))) { path = []; if (view === 'tabs') tab = null; render(); } }, homeAfter * 1000);
+    };
+    box.addEventListener('pointerdown', touched);
+
+    render();
+    return {
+      update: () => { smart(); applyToggles(box); if (pop) applyToggles(pop); },
+      destroy: () => { closePop(); clearTimeout(idle); },
+    };
   },
 };
 

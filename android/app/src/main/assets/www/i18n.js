@@ -10811,6 +10811,22 @@
     'The voice channel you are in, who is there and mute / deafen / leave, as a bar that fits any size; it can hide itself outside a channel.': 'Голосовой канал, в котором вы сейчас, участники и кнопки микрофона, звука и выхода. Подстраивается под любой размер и может скрываться вне канала.',
     'Hide outside a voice channel (the widgets next to it take its place)': 'Скрывать вне голосового канала (соседние виджеты занимают его место)',
     'Allow mute, deafen and leave from the phone': 'Разрешить микрофон, звук и выход с телефона',
+    'Open folders': 'Как открывать папки',
+    'In place, with a Back key': 'На месте, с клавишей «Назад»',
+    'In a window over the page': 'Окном поверх страницы',
+    'As tabs on top': 'Вкладками сверху',
+    'Back to the start after (seconds, 0 = never)': 'Возвращаться к началу через (секунд, 0 — никогда)',
+    'Folder: holds other keys': 'Папка: хранит другие ярлыки',
+    'Keys in the folder': 'Ярлыки в папке',
+    'Take out of the folder': 'Убрать из папки',
+    'Add a key to the folder…': 'Добавить ярлык в папку…',
+    'Empty: add keys below, or tick this folder on a key.': 'Пусто: добавьте ярлыки ниже или отметьте эту папку у нужного ярлыка.',
+    'A key stays where it is and can be in several folders. Keys inside folders leave a grid that shows all keys.': 'Ярлык не копируется и может лежать в нескольких папках. Ярлыки из папок не показываются в сетке «все ярлыки» — до них добираются через папку.',
+    'Smart folder: open by itself while this app is in front on the PC': 'Умная папка: открывать саму, когда на ПК активно приложение',
+    'The program name as Task Manager shows it, e.g. Discord.exe or obs64.exe. Leave empty for an ordinary folder.': 'Имя программы, как в Диспетчере задач, например Discord.exe или obs64.exe. Пусто — обычная папка.',
+    'In folders': 'Лежит в папках',
+    'Ticked: the key is inside that folder on the phone.': 'Отмечено — ярлык лежит в этой папке на планшете.',
+    'AUTO': 'АВТО',
   });
 
   let pref = 'auto';

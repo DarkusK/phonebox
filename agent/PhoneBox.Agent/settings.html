@@ -191,6 +191,10 @@ table.items td.val { font-family: Consolas, monospace; font-size: 12px; max-widt
 .key .ki { font-size: 26px; line-height: 1; }
 .key .kl { font-size: 12.5px; font-weight: 500; max-width: 92%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .key.sel { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
+/* local tweak: shortcut folders */
+.key.is-folder { border-style: double; border-width: 3px; }
+.kf-badge { position: absolute; top: 5px; right: 7px; font-size: 10.5px; padding: 1px 6px; border-radius: 8px; background: rgba(0, 0, 0, .4); color: #e6edf3; white-space: nowrap; }
+.kf-badge.in { right: auto; left: 7px; background: transparent; padding: 0; opacity: .8; }
 .key.add { background: transparent; color: var(--muted); border: 2px dashed var(--line); }
 .key.dragging { opacity: .35; }
 .key.over { outline: 2px dashed var(--accent); outline-offset: 2px; }
@@ -2762,9 +2766,13 @@ function renderDeck() {
   deck.style.setProperty('--cols', deckCols());
   deck.textContent = '';
   cfg.shortcuts.forEach((s, i) => {
-    const k = h('div', { class: 'key' + (i === selKey ? ' sel' : ''), draggable: 'true', 'data-i': i, style: { '--k': s.color || '#6b7280' },
+    // a folder shows how many keys it holds (and AUTO when it is smart); a key inside folders shows a small folder mark
+    const inF = s.id ? foldersOf(s.id) : [];
+    const mark = isFolder(s) ? h('span', { class: 'kf-badge' }, '📁 ' + (s.items || []).length + (s.app ? ' · ' + tl('AUTO') : ''))
+      : inF.length ? h('span', { class: 'kf-badge in', title: inF.map((f) => f.label).join(', ') }, '📁') : null;
+    const k = h('div', { class: 'key' + (i === selKey ? ' sel' : '') + (isFolder(s) ? ' is-folder' : ''), draggable: 'true', 'data-i': i, style: { '--k': s.color || '#6b7280' },
       onclick: () => { selKey = i; renderDeck(); } },
-      h('span', { class: 'ki' }, rich(s.icon || '•')), h('span', { class: 'kl' }, s.label || '(untitled)'));
+      h('span', { class: 'ki' }, rich(s.icon || '•')), h('span', { class: 'kl' }, s.label || '(untitled)'), mark);
     k.style.setProperty('--k', s.color || '#6b7280');
     dragSort(k, cfg.shortcuts, (from, to) => { selKey = to; renderDeck(); changed(); });
     deck.append(k);
@@ -2884,8 +2892,18 @@ function customIconField(s) {
 }
 
 // What a key does: run a program, press keys, type text or run a macro; plus the on / off (toggle) options.
-const KINDS = () => ({ run: t('s.k.runProgram'), keys: t('s.k.pressKeys'), text: t('s.k.typeText'), macro: t('s.k.runMacro'), cycle: t('s.k.cycle') });
-const kindOf = (s) => (s.cmd === 'builtin:keys' ? 'keys' : s.cmd === 'builtin:text' ? 'text' : s.cmd === 'builtin:macro' ? 'macro' : s.cmd === 'builtin:cycle' ? 'cycle' : 'run');
+const KINDS = () => ({ run: t('s.k.runProgram'), keys: t('s.k.pressKeys'), text: t('s.k.typeText'), macro: t('s.k.runMacro'), cycle: t('s.k.cycle'), folder: tl('Folder: holds other keys') });
+const kindOf = (s) => (s.cmd === 'builtin:keys' ? 'keys' : s.cmd === 'builtin:text' ? 'text' : s.cmd === 'builtin:macro' ? 'macro' : s.cmd === 'builtin:cycle' ? 'cycle' : s.cmd === 'builtin:folder' ? 'folder' : 'run');
+// local tweak: shortcut folders. A folder (builtin:folder) lists the ids of the keys inside it; a key can sit in several.
+const isFolder = (s) => s.cmd === 'builtin:folder';
+const foldersOf = (id) => cfg.shortcuts.filter((f) => isFolder(f) && (f.items || []).includes(id));
+// the folders a folder may not go into: itself and every folder inside it, at any depth (no loops)
+function folderDescendants(f, seen = new Set()) {
+  if (seen.has(f.id)) return seen;
+  seen.add(f.id);
+  for (const id of f.items || []) { const k = cfg.shortcuts.find((o) => o.id === id); if (k && isFolder(k)) folderDescendants(k, seen); }
+  return seen;
+}
 function actionFields(s, upd, text, cmdIn, preset) {
   const kind = kindOf(s);
   const area = (value, ph, rows, oninput) => h('textarea', { rows, placeholder: ph, spellcheck: 'false', oninput }, value);
@@ -2895,7 +2913,8 @@ function actionFields(s, upd, text, cmdIn, preset) {
       s.cmd = k === 'run' ? '' : 'builtin:' + k;
       if (k !== 'macro') delete s.steps;
       if (k !== 'cycle') delete s.cycle; else s.cycle ??= [];
-      if (k === 'cycle') s.toggle = false;
+      if (k !== 'folder') { delete s.items; delete s.app; } else { s.items ??= []; s.longPress = null; }
+      if (k === 'cycle' || k === 'folder') s.toggle = false;
       s.args = null; s.cwd = null;
       changed(); renderEditor();
     } }, ...Object.entries(KINDS()).map(([k, l]) => h('option', { value: k, selected: k === kind }, l))))];
@@ -2922,6 +2941,28 @@ function actionFields(s, upd, text, cmdIn, preset) {
       h('button', { class: 'btn sm', type: 'button', disabled: !choices.length || s.cycle.length >= 20, onclick: () => { s.cycle.push(choices[0].id); changed(); renderEditor(); } }, t('s.k.cycleAdd')),
       h('span', { class: 'hint' }, t('s.k.cycleHint')),
       ...(s.cycle.length < 2 ? [h('span', { class: 'hint' }, t('s.k.cycleFew'))] : [])));
+  } else if (kind === 'folder') {
+    // what is inside, in order; a key can be in several folders, a folder never inside itself (at any depth)
+    s.items ??= [];
+    const choices = cfg.shortcuts.filter((o) => o !== s && o.id && !s.items.includes(o.id) && !(isFolder(o) && folderDescendants(o).has(s.id)));
+    const rows = s.items.map((id, i) => {
+      const o = cfg.shortcuts.find((x) => x.id === id);
+      return h('div', { class: 'row', style: { alignItems: 'center', gap: '8px', marginBottom: '6px' } },
+        h('span', { class: 'hint', style: { width: '22px' } }, (i + 1) + '.'),
+        h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, rich((o?.icon || '•') + ' ' + (o?.label || id) + (o && isFolder(o) ? ' 📁' : ''))),
+        h('button', { class: 'btn sm', type: 'button', disabled: i === 0, 'aria-label': t('s.js.earlier'), onclick: () => { [s.items[i - 1], s.items[i]] = [s.items[i], s.items[i - 1]]; changed(); renderEditor(); } }, '↑'),
+        h('button', { class: 'btn sm', type: 'button', disabled: i === s.items.length - 1, 'aria-label': t('s.js.later'), onclick: () => { [s.items[i + 1], s.items[i]] = [s.items[i], s.items[i + 1]]; changed(); renderEditor(); } }, '↓'),
+        h('button', { class: 'btn sm', type: 'button', 'aria-label': tl('Take out of the folder'), title: tl('Take out of the folder'), onclick: () => { s.items.splice(i, 1); changed(); renderDeck(); } }, '×'));
+    });
+    const add = h('select', { onchange: (e) => { if (e.target.value) { s.items.push(e.target.value); changed(); renderDeck(); } } },
+      h('option', { value: '' }, tl('Add a key to the folder…')),
+      ...choices.map((o) => h('option', { value: o.id }, (isFolder(o) ? '📁 ' : '') + (o.label || o.id))));
+    fields.push(h('div', { class: 'field' }, h('label', {}, tl('Keys in the folder')), ...rows,
+      s.items.length ? null : h('span', { class: 'hint' }, tl('Empty: add keys below, or tick this folder on a key.')),
+      add, h('span', { class: 'hint' }, tl('A key stays where it is and can be in several folders. Keys inside folders leave a grid that shows all keys.'))));
+    fields.push(h('div', { class: 'field' }, h('label', {}, tl('Smart folder: open by itself while this app is in front on the PC')),
+      h('input', { type: 'text', value: s.app || '', placeholder: 'Discord.exe', oninput: (e) => { s.app = e.target.value.trim() || null; changed(); renderDeckKeysOnly(); } }),
+      h('span', { class: 'hint' }, tl('The program name as Task Manager shows it, e.g. Discord.exe or obs64.exe. Leave empty for an ordinary folder.'))));
   } else {
     fields.push(h('div', { class: 'field' }, h('label', {}, t('s.k.steps')),
       area((s.steps || []).join('\n'), 'keys:ctrl+c\nwait:200\ntext:Hello\nshortcut:terminal', 6, (e) => upd('steps', e.target.value.split('\n').map((x) => x.trim()).filter(Boolean), false)),
@@ -2930,6 +2971,19 @@ function actionFields(s, upd, text, cmdIn, preset) {
   if (osName === 'macos' && kind !== 'run' && kind !== 'cycle') fields.push(h('p', { class: 'hint' }, t('s.k.macosPermission')));
   if (osName === 'linux' && kind !== 'run' && kind !== 'cycle') fields.push(h('p', { class: 'hint' }, t('s.k.linuxNeedsXdotool')));
 
+  // the folders this key sits in, ticked here to move it between folders
+  const folders = cfg.shortcuts.filter((f) => isFolder(f) && f !== s && f.id && !(isFolder(s) && folderDescendants(s).has(f.id)));
+  if (s.id && folders.length) {
+    fields.push(h('div', { class: 'field' }, h('label', {}, tl('In folders')),
+      ...folders.map((f) => h('label', { class: 'check' },
+        h('input', { type: 'checkbox', checked: (f.items || []).includes(s.id), onchange: (e) => {
+          f.items ??= [];
+          if (e.target.checked) { if (!f.items.includes(s.id)) f.items.push(s.id); } else f.items = f.items.filter((x) => x !== s.id);
+          changed(); renderDeck();
+        } }), rich((f.icon || '📁') + ' ' + (f.label || f.id) + (f.app ? ' · ' + f.app : '')))),
+      h('span', { class: 'hint' }, tl('Ticked: the key is inside that folder on the phone.'))));
+  }
+  if (kind === 'folder') return fields;
   const isMute = s.cmd === 'builtin:mute';
   if (kind !== 'cycle') fields.push(h('label', { class: 'check', style: { marginTop: '4px' } },
     h('input', { type: 'checkbox', checked: !!s.toggle || isMute, disabled: isMute, onchange: (e) => { s.toggle = e.target.checked; changed(); renderEditor(); } }),
@@ -2970,6 +3024,8 @@ function delKey() {
   cfg.shortcuts.splice(selKey, 1);
   // a key that cycles through the deleted one no longer lists it (the select would otherwise show another key for it)
   for (const o of cfg.shortcuts) if (Array.isArray(o.cycle)) o.cycle = o.cycle.filter((id) => id !== s.id);
+  // nor does a folder keep it (a deleted folder's keys stay, just outside it)
+  for (const o of cfg.shortcuts) if (Array.isArray(o.items)) o.items = o.items.filter((id) => id !== s.id);
   selKey = Math.max(0, selKey - 1);
   renderDeck(); changed();
 }

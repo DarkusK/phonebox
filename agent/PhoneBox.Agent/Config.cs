@@ -85,7 +85,8 @@ public sealed class AgentConfig
         shortcuts = Shortcuts.Select(s =>
         {
             var pic = shortcutIcon?.Invoke(s);
-            return new { s.Id, s.Label, s.Icon, s.Color, toggle = s.Toggle || s.Cmd == "builtin:mute", hold = s.LongPress is not null, cycle = s.Cmd == "builtin:cycle" && s.Cycle is { Count: > 0 }, iconRev = pic?.Rev, iconUpload = pic?.Upload == true };
+            return new { s.Id, s.Label, s.Icon, s.Color, toggle = s.Toggle || s.Cmd == "builtin:mute", hold = s.LongPress is not null, cycle = s.Cmd == "builtin:cycle" && s.Cycle is { Count: > 0 }, iconRev = pic?.Rev, iconUpload = pic?.Upload == true,
+                folder = s.Cmd == "builtin:folder" ? s.Items ?? [] : null, app = s.Cmd == "builtin:folder" ? s.App : null };
         }),
         // names only (for the Rules widget); what a rule matches on stays here
         rules = Rules.Select(r => new { r.Id, r.Name, r.Enabled, r.When }),
@@ -469,6 +470,11 @@ public sealed class Shortcut
     /// <summary>builtin:cycle: ids of the shortcuts to run one after another, a tap each; the key shows the one that ran last.</summary>
     public List<string>? Cycle { get; set; }
     public const int MaxCycle = 20;
+    /// <summary>builtin:folder: the ids of the keys (and folders) inside it, in order. Tapping a folder opens it on the phone.</summary>
+    public List<string>? Items { get; set; }
+    public const int MaxItems = 64;
+    /// <summary>builtin:folder: a smart folder opens by itself while this app is in front on the PC ("Discord" or "Discord.exe").</summary>
+    public string? App { get; set; }
 }
 
 /// <summary>Reads/writes config.json; external edits are picked up on the next request.</summary>
@@ -711,6 +717,12 @@ public sealed partial class ConfigStore(string path)
                 : null;
             // a cycle key runs the next key, not a command of its own: an on / off setting would bypass the cycle
             if (s.Cmd == "builtin:cycle") { s.Toggle = false; s.StateKey = null; s.OffCmd = null; s.OffArgs = null; }
+            // a folder holds keys that exist, each once, never itself; it runs nothing, so it is never an on / off key
+            s.Items = s.Cmd == "builtin:folder"
+                ? (s.Items ?? []).Select(x => x?.Trim() ?? "").Where(x => x != s.Id && c.Shortcuts.Any(o => o.Id == x)).Distinct().Take(Shortcut.MaxItems).ToList()
+                : null;
+            s.App = s.Cmd == "builtin:folder" && !string.IsNullOrWhiteSpace(s.App) ? s.App.Trim() : null;
+            if (s.Cmd == "builtin:folder") { s.Toggle = false; s.StateKey = null; s.OffCmd = null; s.OffArgs = null; s.LongPress = null; }
         }
         c.Phones = (c.Phones ?? []).Where(p => p is not null && !string.IsNullOrWhiteSpace(p.Id)).GroupBy(p => p.Id).Select(g => g.First()).Take(20).ToList();
         foreach (var ph in c.Phones)

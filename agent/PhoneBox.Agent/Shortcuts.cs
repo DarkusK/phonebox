@@ -204,6 +204,9 @@ public static class Shortcuts
             {
                 case "builtin:cycle":
                     return RunCycle(cfg, sc, log, push, audio, depth);
+                case "builtin:folder":
+                    return null; // a folder opens on the phone; on the PC there is nothing to run
+
                 case "builtin:keys":
                     PressKeys(sc.Args ?? "");
                     break;
