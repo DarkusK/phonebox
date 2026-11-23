@@ -676,8 +676,11 @@ app.MapPost("/api/discord/{action}", async (string action, string? channel, Disc
 app.MapGet("/api/ytmusic", async (YtMusic yt, CancellationToken ct) => Results.Json(await yt.SnapshotAsync(ct)));
 app.MapGet("/api/ytmusic/img", async (string u, YtMusic yt, CancellationToken ct) =>
     await yt.ImageAsync(u, ct) is { } img ? Results.File(img.Data, img.Type, lastModified: null, entityTag: null, enableRangeProcessing: false) : Results.NotFound());
-app.MapPost("/api/ytmusic/{action}", async (string action, double? value, YtMusic yt, CancellationToken ct) =>
-    await yt.ActAsync(action, value, ct) is { } error ? Results.BadRequest(new { error }) : Results.Ok(new { ok = true }));
+// search and "for you" are GETs with the query in the address: the phone's USB transport carries no request bodies
+app.MapGet("/api/ytmusic/search", async (string q, string? filter, YtMusic yt, CancellationToken ct) => Results.Json(await yt.SearchAsync(q, filter, ct)));
+app.MapGet("/api/ytmusic/foryou", async (YtMusic yt, CancellationToken ct) => Results.Json(await yt.ForYouAsync(ct)));
+app.MapPost("/api/ytmusic/{action}", async (string action, double? value, string? id, double? to, YtMusic yt, CancellationToken ct) =>
+    await yt.ActAsync(action, value, id, to, ct) is { } error ? Results.BadRequest(new { error }) : Results.Ok(new { ok = true }));
 
 // Steam friends presence; the API key stays on the computer and only the public presence snapshot reaches the phone.
 app.MapGet("/api/steam", (SteamMonitor steam, ConfigStore cfg) =>

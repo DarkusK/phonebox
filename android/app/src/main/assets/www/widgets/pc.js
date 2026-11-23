@@ -1,6 +1,7 @@
 import { $, API, D, curPage, pages, PANEL_HEADERS, LOCALE, Q_STYLE, api, bridge, cfg, color, cssVar, rulesPaused, toggleRulesPause, fillIcon, fmtDur, fmtHM, fmtMem, gotoPageRef, gpuMem, gpusOf, h, en, haptic, icon, openSheet, paceInfo, pad, pairedPcs, quotaProviders, r1, shortDur, shortGpu, store, switchPc, t, tick, toast, transport, emo, labelled, rich, tp, tpv, quotaText } from '../main.js';
 import { W } from '../registry.js';
 import { canKillAnywhere, dialEl, every } from './helpers.js';
+import { listenOnce } from './dictate.js';
 
 // ---------------------------------------------------------------- phone & PC
 // Your own HTML / CSS / JavaScript in a sandboxed iframe (no access to the panel, the agent or the phone). It gets
@@ -403,31 +404,87 @@ W['discord-bar'] = {
 };
 
 // YouTube Music through its desktop app on the PC (local tweak; agent: YtMusic). One widget for every size: large it is
-// a player with the queue beside it, smaller a card, a bar, or just the cover and play (style.css, container queries).
+// a player with a side panel (queue, search, "for you"); smaller a card, a bar, or just the cover and play (style.css,
+// container queries). A long press on a song opens its menu: play now, next, at the end, its album, its artist.
 W.ytmusic = {
   needs: ['tick', 'fast'],
   create(box, { page }) {
     let data = null, fetchedAt = 0, busy = null, queueKey = '', coverUrl = '';
+    let tab = store.get('ytm-tab', 'queue');
     const ytImg = (u) => (u ? `${API}/ytmusic/img?u=${encodeURIComponent(u)}` : '');
     const fmt = (s) => { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + pad(s % 60); };
+    // where the song playing sits in the queue: found by its id (the queue's own "selected" mark can lag behind)
+    const nowAt = (q) => { const v = data?.song?.videoId; const i = v ? q.findIndex((x) => x.videoId === v) : -1; return i >= 0 ? i : Math.max(0, q.findIndex((x) => x.selected)); };
     const load = async () => { try { data = await api('/ytmusic'); fetchedAt = Date.now(); } catch (_) {} };
-    const act = async (action, value) => {
+    const post = async (action, q = {}) => {
+      const qs = Object.entries(q).filter(([, v]) => v != null).map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&');
+      const r = await fetch(`${API}/ytmusic/${action}` + (qs ? '?' + qs : ''), { method: 'POST', cache: 'no-store', headers: PANEL_HEADERS });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'YouTube Music');
+    };
+    const act = async (action, q, done) => {
       if (busy) return;
       haptic(); busy = action;
-      try {
-        const r = await fetch(`${API}/ytmusic/${action}` + (value != null ? '?value=' + encodeURIComponent(value) : ''), { method: 'POST', cache: 'no-store', headers: PANEL_HEADERS });
-        if (!r.ok) toast((await r.json().catch(() => ({}))).error || 'YouTube Music', 'err');
-      } catch (_) { toast(t('panel.pcNoAnswer'), 'err'); }
-      await load(); busy = null; render();
+      try { await post(action, q); if (done) toast(done); } catch (e) { toast(e.message || t('panel.pcNoAnswer'), 'err'); }
+      await load(); busy = null; queueKey = ''; render();
     };
     const btn = (cls, ic, label, action) => {
       const b = labelled(h('button', 'ytm-b ' + cls, icon(ic)), label);
       b.addEventListener('click', () => act(action));
       return b;
     };
-    // built once; each poll only changes texts, classes and the pictures that differ
+    const thumbEl = (url, cls = 'ytm-qc') => {
+      const th = h('span', cls, icon('music'));
+      if (url) { const im = new Image(); im.alt = ''; im.onload = () => th.replaceChildren(im); im.src = ytImg(url); }
+      return th;
+    };
+    // a tap does the main thing; holding opens the menu (the tap that ends the hold does nothing)
+    const pressable = (el, onTap, onHold) => {
+      let timer = 0, held = false, x0 = 0, y0 = 0;
+      el.addEventListener('pointerdown', (e) => { held = false; x0 = e.clientX; y0 = e.clientY; clearTimeout(timer); timer = setTimeout(() => { held = true; haptic(); onHold(); }, 480); });
+      el.addEventListener('pointermove', (e) => { if (timer && Math.hypot(e.clientX - x0, e.clientY - y0) > 10) { clearTimeout(timer); timer = 0; } });
+      ['pointerup', 'pointercancel', 'pointerleave'].forEach((ev) => el.addEventListener(ev, () => { clearTimeout(timer); timer = 0; }));
+      el.addEventListener('contextmenu', (e) => e.preventDefault());
+      el.addEventListener('click', () => { if (held) { held = false; return; } onTap(); });
+    };
+
+    // ---- the menu of a song (search, "for you", queue)
+    const menu = h('div', 'ytm-menu');
+    menu.hidden = true;
+    menu.addEventListener('click', (e) => { if (e.target === menu) menu.hidden = true; });
+    const openMenu = (title, sub, entries) => {
+      menu.replaceChildren(h('div', 'ytm-mbox', h('div', 'ytm-mhead', h('b', null, title), h('span', null, sub || '')),
+        ...entries.filter(Boolean).map(([ic, label, fn]) => {
+          const b = h('button', 'ytm-mi', icon(ic), h('span', null, label));
+          b.addEventListener('click', () => { menu.hidden = true; fn(); });
+          return b;
+        })));
+      menu.hidden = false;
+    };
+    const artistOf = (it) => (it.sub || '').split('•').map((x) => x.trim()).find((x, i) => i > 0 || !/^(Композиция|Song|Видео|Video|Альбом|Album)$/i.test(x)) || '';
+    const songMenu = (it) => openMenu(it.title, it.sub, [
+      ['play', dcL('Play now', 'Играть сейчас'), () => act('play-now', { id: it.videoId })],
+      ['skip-forward', dcL('Play next', 'Играть следующим'), () => act('add-next', { id: it.videoId }, dcL('Plays next', 'Будет следующим'))],
+      ['list-music', dcL('Add to the end of the queue', 'В конец очереди'), () => act('add-end', { id: it.videoId }, dcL('Added to the queue', 'Добавлено в очередь'))],
+      artistOf(it) ? ['user', dcL('Find the artist\'s songs', 'Найти песни исполнителя'), () => search(artistOf(it), 'songs')] : null,
+      artistOf(it) ? ['folder', dcL('Find the artist\'s albums', 'Найти альбомы исполнителя'), () => search(artistOf(it), 'albums')] : null,
+    ]);
+    // what a result does when tapped: a song plays, an album or artist opens its songs in the search
+    const tapItem = (it) => {
+      if (it.kind === 'song') act('play-now', { id: it.videoId });
+      else if (it.kind === 'album') search(it.title + ' ' + artistOf(it), 'songs');
+      else if (it.kind === 'artist') search(it.title, 'songs');
+    };
+    const itemRow = (it) => {
+      const kindLabel = it.kind === 'album' ? dcL('Album', 'Альбом') : it.kind === 'artist' ? dcL('Artist', 'Исполнитель') : '';
+      const row = h('button', 'ytm-q' + (it.kind === 'artist' ? ' artist' : ''), thumbEl(it.thumb),
+        h('span', 'ytm-qt', h('b', null, it.title || ''), h('small', null, it.sub || '')), kindLabel ? h('span', 'ytm-kind', kindLabel) : '');
+      pressable(row, () => tapItem(it), () => (it.kind === 'song' ? songMenu(it) : tapItem(it)));
+      return row;
+    };
+
+    // ---- player (left)
     const cover = h('div', 'ytm-cover', icon('music'));
-    const title = h('b', 'ytm-title'), artist = h('span', 'ytm-artist');
+    const title = h('b', 'ytm-title'), artist = h('span', 'ytm-artist'), nextLine = h('span', 'ytm-nextline');
     const like = btn('ytm-like', 'thumbs-up', dcL('Like', 'Нравится'), 'like');
     const dislike = btn('ytm-dislike', 'thumbs-down', dcL('Dislike', 'Не нравится'), 'dislike');
     const shuffle = btn('ytm-shuffle', 'shuffle', dcL('Shuffle', 'Перемешать'), 'shuffle');
@@ -438,12 +495,132 @@ W.ytmusic = {
     const fill = h('i'), bar = h('div', 'ytm-bar', fill), tPos = h('span'), tDur = h('span');
     bar.addEventListener('click', (e) => {
       const d = data?.song?.duration; if (!d) return;
-      const r = bar.getBoundingClientRect(); act('seek', Math.round(((e.clientX - r.left) / r.width) * d));
+      const r = bar.getBoundingClientRect(); act('seek', { value: Math.round(((e.clientX - r.left) / r.width) * d) });
     });
     const volFill = h('i'), vol = h('div', 'ytm-vbar', volFill), volN = h('span', 'ytm-vn');
-    vol.addEventListener('click', (e) => { const r = vol.getBoundingClientRect(); act('volume', Math.round(((e.clientX - r.left) / r.width) * 100)); });
+    vol.addEventListener('click', (e) => { const r = vol.getBoundingClientRect(); act('volume', { value: Math.round(((e.clientX - r.left) / r.width) * 100) }); });
     const mute = btn('ytm-mute', 'volume-2', dcL('Mute', 'Без звука'), 'toggle-mute');
+
+    // ---- side panel (right): queue / search / for you
+    const tabsEl = h('div', 'ytm-tabs');
+    const pane = h('div', 'ytm-pane');
+    const TABS = [['queue', dcL('Queue', 'Очередь')], ['search', dcL('Search', 'Поиск')], ['foryou', dcL('For you', 'Для вас')]];
+    const drawTabs = () => tabsEl.replaceChildren(...TABS.map(([id, label]) => {
+      const b = h('button', 'ytm-tab' + (id === tab ? ' on' : ''), label);
+      b.addEventListener('click', () => { haptic(); tab = id; store.set('ytm-tab', id); drawTabs(); drawPane(); });
+      return b;
+    }));
+
+    // queue
+    const qHead = h('div', 'ytm-phead', h('span', 'ytm-cap', dcL('Up next', 'Далее в очереди')));
+    const clearBtn = h('button', 'ytm-chip', icon('trash-2'), dcL('Clear', 'Очистить'));
+    clearBtn.addEventListener('click', () => { if (confirm(dcL('Clear the queue?', 'Очистить очередь?'))) act('clear'); });
+    qHead.append(clearBtn);
     const qList = h('div', 'ytm-qlist');
+    const queueMenu = (x, idx, at, last) => openMenu(x.title, x.artist, [
+      ['play', dcL('Play now', 'Играть сейчас'), () => act('jump', { value: idx })],
+      idx > at + 1 ? ['skip-forward', dcL('Play next', 'Играть следующим'), () => act('move', { value: idx, to: at + 1 })] : null,
+      idx > at + 1 ? ['arrow-up', dcL('Up', 'Выше'), () => act('move', { value: idx, to: idx - 1 })] : null,
+      idx < last ? ['chevron-down', dcL('Down', 'Ниже'), () => act('move', { value: idx, to: idx + 1 })] : null,
+      x.artist ? ['user', dcL('Find the artist\'s songs', 'Найти песни исполнителя'), () => search(x.artist, 'songs')] : null,
+      ['trash-2', dcL('Remove from the queue', 'Убрать из очереди'), () => act('remove', { value: idx })],
+    ]);
+    const drawQueue = () => {
+      const q = data?.queue || [];
+      const at = nowAt(q);
+      const key = JSON.stringify(q.map((x) => x.videoId)) + at;
+      if (key === queueKey) return;
+      queueKey = key;
+      qList.replaceChildren(...q.slice(at, at + 30).map((x, i) => {
+        const idx = at + i;
+        const row = h('button', 'ytm-q' + (i === 0 ? ' cur' : ''), thumbEl(x.thumb), h('span', 'ytm-qt', h('b', null, x.title || ''), h('small', null, x.artist || '')), h('span', 'ytm-ql', x.length || ''));
+        pressable(row, () => { if (i > 0) act('jump', { value: idx }); }, () => queueMenu(x, idx, at, q.length - 1));
+        return row;
+      }));
+    };
+
+    // search
+    let query = '', filter = '', results = null, searching = false;
+    const input = h('input', 'ytm-input');
+    input.type = 'search'; input.placeholder = dcL('Songs, albums, artists', 'Песни, альбомы, исполнители'); input.enterKeyHint = 'search';
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); search(input.value, filter); } });
+    const micBtn = labelled(h('button', 'ytm-b ytm-mic', icon('mic')), dcL('Search by voice', 'Голосовой поиск'));
+    let stopVoice = null;
+    micBtn.addEventListener('click', () => {
+      haptic();
+      if (stopVoice) { stopVoice(); return; }
+      stopVoice = listenOnce((kind, text) => {
+        if (kind === 'partial') input.value = text;
+        else { stopVoice = null; micBtn.classList.remove('on'); if (kind === 'final' && text.trim()) search(text, filter); }
+      });
+      if (stopVoice) micBtn.classList.add('on'); else toast(dcL('Voice input is not available', 'Голосовой ввод недоступен'), 'err');
+    });
+    const goBtn = labelled(h('button', 'ytm-b ytm-go', icon('arrow-up')), dcL('Search', 'Найти'));
+    goBtn.addEventListener('click', () => { input.blur(); search(input.value, filter); });
+    const FILTERS = [['', dcL('All', 'Всё')], ['songs', dcL('Songs', 'Треки')], ['albums', dcL('Albums', 'Альбомы')], ['artists', dcL('Artists', 'Исполнители')], ['videos', dcL('Videos', 'Видео')]];
+    const chips = h('div', 'ytm-chips');
+    const resList = h('div', 'ytm-qlist');
+    const drawChips = () => chips.replaceChildren(...FILTERS.map(([id, label]) => {
+      const b = h('button', 'ytm-chip' + (id === filter ? ' on' : ''), label);
+      b.addEventListener('click', () => { haptic(); filter = id; drawChips(); if (query) search(query, filter); });
+      return b;
+    }));
+    const drawResults = () => {
+      if (searching) { resList.replaceChildren(h('div', 'ytm-empty', t('w.loading'))); return; }
+      if (!results) {
+        // nothing searched yet: the last searches, one tap away
+        const recent = store.get('ytm-recent', []);
+        resList.replaceChildren(h('span', 'ytm-cap', dcL('Recent searches', 'Недавние запросы')),
+          recent.length ? h('div', 'ytm-chips wrap', ...recent.map((q) => { const b = h('button', 'ytm-chip', icon('rotate-ccw'), q); b.addEventListener('click', () => search(q, filter)); return b; }))
+            : h('div', 'ytm-empty', dcL('Type or say what to find', 'Напишите или скажите, что найти')));
+        return;
+      }
+      if (results.error) { resList.replaceChildren(h('div', 'ytm-empty', results.error)); return; }
+      const secs = results.sections || [];
+      if (!secs.length) { resList.replaceChildren(h('div', 'ytm-empty', dcL('Nothing found', 'Ничего не найдено'))); return; }
+      resList.replaceChildren(...secs.flatMap((s, i) => [h('span', 'ytm-cap', s.title || (i === 0 ? dcL('Top result', 'Лучший результат') : dcL('Results', 'Результаты'))), ...s.items.map(itemRow)]));
+      resList.scrollTop = 0;
+    };
+    async function search(q, f) {
+      q = String(q || '').trim();
+      if (!q) return;
+      query = q; filter = f || ''; input.value = q; searching = true;
+      store.set('ytm-recent', [q, ...store.get('ytm-recent', []).filter((x) => x !== q)].slice(0, 8));
+      if (tab !== 'search') { tab = 'search'; store.set('ytm-tab', tab); drawTabs(); drawPane(); }
+      drawChips(); drawResults();
+      try { results = await api('/ytmusic/search?q=' + encodeURIComponent(q) + (filter ? '&filter=' + filter : ''), 'GET', 20000); }
+      catch (_) { results = { error: t('panel.pcNoAnswer') }; }
+      searching = false; drawResults();
+    }
+    const searchPane = h('div', 'ytm-spane', h('div', 'ytm-sbar', input, micBtn, goBtn), chips, resList);
+
+    // for you
+    let forYou = null, forYouAt = 0;
+    const fyList = h('div', 'ytm-qlist');
+    const drawForYou = async (force = false) => {
+      const mix = (data?.queue || []);
+      const at = nowAt(mix);
+      const mixRows = mix.slice(at + 1, at + 7).map((x, i) => {
+        const row = h('button', 'ytm-q', thumbEl(x.thumb), h('span', 'ytm-qt', h('b', null, x.title || ''), h('small', null, x.artist || '')), h('span', 'ytm-ql', x.length || ''));
+        pressable(row, () => act('jump', { value: at + 1 + i }), () => queueMenu(x, at + 1 + i, at, mix.length - 1));
+        return row;
+      });
+      const draw = () => fyList.replaceChildren(
+        ...(mixRows.length ? [h('span', 'ytm-cap', dcL('Your mix, next', 'Ваш микс, дальше')), ...mixRows] : []),
+        ...(forYou?.sections || []).flatMap((s) => [h('span', 'ytm-cap', dcL('More of ', 'Ещё: ') + s.title), ...s.items.map(itemRow)]),
+        ...(forYou?.error ? [h('div', 'ytm-empty', forYou.error)] : []));
+      draw();
+      if (!force && forYou && Date.now() - forYouAt < 5 * 60_000) return;
+      try { forYou = await api('/ytmusic/foryou', 'GET', 30000); forYouAt = Date.now(); } catch (_) {}
+      if (tab === 'foryou') draw();
+    };
+
+    const drawPane = () => {
+      if (tab === 'search') { pane.replaceChildren(searchPane); drawChips(); drawResults(); }
+      else if (tab === 'foryou') { pane.replaceChildren(fyList); drawForYou(); }
+      else { pane.replaceChildren(qHead, qList); queueKey = ''; drawQueue(); }
+    };
+
     const msg = h('div', 'ytm-msg');
     box.append(h('div', 'ytm',
       h('div', 'ytm-main',
@@ -453,8 +630,10 @@ W.ytmusic = {
           h('div', 'ytm-likes', like, dislike),
           h('div', 'ytm-prog', bar, h('div', 'ytm-times', tPos, tDur)),
           h('div', 'ytm-ctl', shuffle, prev, play, next, repeat),
-          h('div', 'ytm-vol', mute, vol, volN))),
-      h('div', 'ytm-queue', h('span', 'ytm-cap', dcL('Up next', 'Далее в очереди')), qList)), msg);
+          h('div', 'ytm-vol', mute, vol, volN),
+          nextLine)),
+      h('div', 'ytm-side', tabsEl, pane)), msg, menu);
+    drawTabs(); drawPane();
 
     const render = () => {
       const s = data?.song;
@@ -483,20 +662,10 @@ W.ytmusic = {
       const v = data.volume ?? 0;
       volFill.style.width = (data.muted ? 0 : v) + '%'; volN.textContent = data.muted ? '—' : Math.round(v) + '%';
       mute.replaceChildren(icon(data.muted || !v ? 'volume-x' : 'volume-2'));
-      // the queue from the song playing on; redrawn only when it changes (the covers would flash)
-      const q = data.queue || [];
-      const at = Math.max(0, q.findIndex((x) => x.selected));
-      const key = JSON.stringify(q.map((x) => x.videoId)) + at;
-      if (key !== queueKey) {
-        queueKey = key;
-        qList.replaceChildren(...q.slice(at, at + 12).map((x, i) => {
-          const th = h('span', 'ytm-qc', icon('music'));
-          if (x.thumb) { const im = new Image(); im.alt = ''; im.onload = () => th.replaceChildren(im); im.src = ytImg(x.thumb); }
-          const row = h('button', 'ytm-q' + (i === 0 ? ' cur' : ''), th, h('span', 'ytm-qt', h('b', null, x.title || ''), h('small', null, x.artist || '')), h('span', 'ytm-ql', x.length || ''));
-          if (i > 0) row.addEventListener('click', () => act('jump', at + i));
-          return row;
-        }));
-      }
+      // the smaller sizes show what plays next
+      const q = data.queue || [], at = nowAt(q), nx = q[at + 1] || null;
+      nextLine.textContent = nx ? dcL('Next: ', 'Далее: ') + nx.title + (nx.artist ? ' · ' + nx.artist : '') : '';
+      if (tab === 'queue') drawQueue();
     };
     const visible = () => box.isConnected && !document.hidden && pages[curPage] === page && !box.closest('.stack-item:not(.active)');
     let next0 = 0, asking = false, shown = false;
@@ -508,7 +677,7 @@ W.ytmusic = {
       asking = true;
       load().then(() => { asking = false; next0 = Date.now() + (data?.connected ? 1000 : 4000); render(); });
     };
-    return { update: (kind) => { poll(); if (kind !== 'fast') render(); } };
+    return { update: (kind) => { poll(); if (kind !== 'fast') render(); }, destroy: () => { if (stopVoice) stopVoice(); } };
   },
 };
 

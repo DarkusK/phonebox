@@ -14,6 +14,16 @@ window.onAndroidSpeech = (kind, text, id) => { const handler = sessions.get(id);
 
 const MAX_CHARS = 1000; // Dictation.MaxChars on the agent
 
+/** One spoken phrase for another widget (local tweak: YouTube Music's search). Calls back with ('partial' | 'final' |
+ *  'error', text); returns a stop function, or null when the phone can't listen. */
+export function listenOnce(onEvent) {
+  if (!(bridge && bridge.listen && bridge.canListen && bridge.canListen())) return null;
+  const id = bridge.listen('', false) || 0;
+  if (!id) return null;
+  sessions.set(id, (kind, text) => { if (kind === 'final' || kind === 'error') sessions.delete(id); onEvent(kind, text); });
+  return () => { if (sessions.has(id)) bridge.stopListening(id); };
+}
+
 const ERRORS = {
   '1': 'w.dictate.network', '2': 'w.dictate.network', '4': 'w.dictate.network', '13': 'w.dictate.network',
   '6': 'w.dictate.noMatch', '7': 'w.dictate.noMatch',
