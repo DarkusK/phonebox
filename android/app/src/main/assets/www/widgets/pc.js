@@ -402,6 +402,116 @@ W['discord-bar'] = {
   },
 };
 
+// YouTube Music through its desktop app on the PC (local tweak; agent: YtMusic). One widget for every size: large it is
+// a player with the queue beside it, smaller a card, a bar, or just the cover and play (style.css, container queries).
+W.ytmusic = {
+  needs: ['tick', 'fast'],
+  create(box, { page }) {
+    let data = null, fetchedAt = 0, busy = null, queueKey = '', coverUrl = '';
+    const ytImg = (u) => (u ? `${API}/ytmusic/img?u=${encodeURIComponent(u)}` : '');
+    const fmt = (s) => { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + pad(s % 60); };
+    const load = async () => { try { data = await api('/ytmusic'); fetchedAt = Date.now(); } catch (_) {} };
+    const act = async (action, value) => {
+      if (busy) return;
+      haptic(); busy = action;
+      try {
+        const r = await fetch(`${API}/ytmusic/${action}` + (value != null ? '?value=' + encodeURIComponent(value) : ''), { method: 'POST', cache: 'no-store', headers: PANEL_HEADERS });
+        if (!r.ok) toast((await r.json().catch(() => ({}))).error || 'YouTube Music', 'err');
+      } catch (_) { toast(t('panel.pcNoAnswer'), 'err'); }
+      await load(); busy = null; render();
+    };
+    const btn = (cls, ic, label, action) => {
+      const b = labelled(h('button', 'ytm-b ' + cls, icon(ic)), label);
+      b.addEventListener('click', () => act(action));
+      return b;
+    };
+    // built once; each poll only changes texts, classes and the pictures that differ
+    const cover = h('div', 'ytm-cover', icon('music'));
+    const title = h('b', 'ytm-title'), artist = h('span', 'ytm-artist');
+    const like = btn('ytm-like', 'thumbs-up', dcL('Like', 'Нравится'), 'like');
+    const dislike = btn('ytm-dislike', 'thumbs-down', dcL('Dislike', 'Не нравится'), 'dislike');
+    const shuffle = btn('ytm-shuffle', 'shuffle', dcL('Shuffle', 'Перемешать'), 'shuffle');
+    const prev = btn('ytm-prev', 'skip-back', dcL('Previous', 'Предыдущий'), 'previous');
+    const play = btn('ytm-play', 'play', dcL('Play / pause', 'Play / пауза'), 'toggle-play');
+    const next = btn('ytm-next', 'skip-forward', dcL('Next', 'Следующий'), 'next');
+    const repeat = btn('ytm-repeat', 'repeat', dcL('Repeat', 'Повтор'), 'repeat');
+    const fill = h('i'), bar = h('div', 'ytm-bar', fill), tPos = h('span'), tDur = h('span');
+    bar.addEventListener('click', (e) => {
+      const d = data?.song?.duration; if (!d) return;
+      const r = bar.getBoundingClientRect(); act('seek', Math.round(((e.clientX - r.left) / r.width) * d));
+    });
+    const volFill = h('i'), vol = h('div', 'ytm-vbar', volFill), volN = h('span', 'ytm-vn');
+    vol.addEventListener('click', (e) => { const r = vol.getBoundingClientRect(); act('volume', Math.round(((e.clientX - r.left) / r.width) * 100)); });
+    const mute = btn('ytm-mute', 'volume-2', dcL('Mute', 'Без звука'), 'toggle-mute');
+    const qList = h('div', 'ytm-qlist');
+    const msg = h('div', 'ytm-msg');
+    box.append(h('div', 'ytm',
+      h('div', 'ytm-main',
+        cover,
+        h('div', 'ytm-info',
+          h('span', 'ytm-cap', dcL('Now playing · YouTube Music', 'Сейчас играет · YouTube Music')), title, artist,
+          h('div', 'ytm-likes', like, dislike),
+          h('div', 'ytm-prog', bar, h('div', 'ytm-times', tPos, tDur)),
+          h('div', 'ytm-ctl', shuffle, prev, play, next, repeat),
+          h('div', 'ytm-vol', mute, vol, volN))),
+      h('div', 'ytm-queue', h('span', 'ytm-cap', dcL('Up next', 'Далее в очереди')), qList)), msg);
+
+    const render = () => {
+      const s = data?.song;
+      box.classList.toggle('ytm-off', !data?.connected || !s);
+      if (!data) { msg.textContent = t('w.loading'); return; }
+      if (!data.connected) { msg.textContent = dcL('Open YouTube Music on the PC (API Server plugin on)', 'Откройте YouTube Music на ПК (плагин API Server включён)'); return; }
+      if (!s) { msg.textContent = dcL('Nothing is playing in YouTube Music', 'В YouTube Music ничего не играет'); return; }
+      title.textContent = s.title || ''; artist.textContent = [s.artist, s.album].filter(Boolean).join(' · ');
+      if (s.cover !== coverUrl) {
+        coverUrl = s.cover || '';
+        const im = new Image(); im.alt = '';
+        im.onload = () => { if (coverUrl === (s.cover || '')) cover.replaceChildren(im); };
+        if (coverUrl) im.src = ytImg(coverUrl); else cover.replaceChildren(icon('music'));
+      }
+      const playing = !s.paused;
+      play.replaceChildren(icon(playing ? 'pause' : 'play'));
+      like.classList.toggle('on', data.like === 'LIKE');
+      dislike.classList.toggle('on', data.like === 'DISLIKE');
+      shuffle.classList.toggle('on', !!data.shuffle);
+      repeat.classList.toggle('on', data.repeat && data.repeat !== 'NONE');
+      repeat.replaceChildren(icon(data.repeat === 'ONE' ? 'repeat-1' : 'repeat'));
+      // the position runs on between polls while playing
+      const pos = Math.min(s.duration || 0, (s.elapsed || 0) + (playing ? (Date.now() - fetchedAt) / 1000 : 0));
+      fill.style.width = s.duration ? (pos / s.duration) * 100 + '%' : '0';
+      tPos.textContent = fmt(pos); tDur.textContent = fmt(s.duration);
+      const v = data.volume ?? 0;
+      volFill.style.width = (data.muted ? 0 : v) + '%'; volN.textContent = data.muted ? '—' : Math.round(v) + '%';
+      mute.replaceChildren(icon(data.muted || !v ? 'volume-x' : 'volume-2'));
+      // the queue from the song playing on; redrawn only when it changes (the covers would flash)
+      const q = data.queue || [];
+      const at = Math.max(0, q.findIndex((x) => x.selected));
+      const key = JSON.stringify(q.map((x) => x.videoId)) + at;
+      if (key !== queueKey) {
+        queueKey = key;
+        qList.replaceChildren(...q.slice(at, at + 12).map((x, i) => {
+          const th = h('span', 'ytm-qc', icon('music'));
+          if (x.thumb) { const im = new Image(); im.alt = ''; im.onload = () => th.replaceChildren(im); im.src = ytImg(x.thumb); }
+          const row = h('button', 'ytm-q' + (i === 0 ? ' cur' : ''), th, h('span', 'ytm-qt', h('b', null, x.title || ''), h('small', null, x.artist || '')), h('span', 'ytm-ql', x.length || ''));
+          if (i > 0) row.addEventListener('click', () => act('jump', at + i));
+          return row;
+        }));
+      }
+    };
+    const visible = () => box.isConnected && !document.hidden && pages[curPage] === page && !box.closest('.stack-item:not(.active)');
+    let next0 = 0, asking = false, shown = false;
+    const poll = () => {
+      const now = visible();
+      if (now && !shown) next0 = 0;
+      shown = now;
+      if (asking || !now || Date.now() < next0) return;
+      asking = true;
+      load().then(() => { asking = false; next0 = Date.now() + (data?.connected ? 1000 : 4000); render(); });
+    };
+    return { update: (kind) => { poll(); if (kind !== 'fast') render(); } };
+  },
+};
+
 // Steam friends presence via the local agent's Web API connection. The API key never reaches the phone.
 const steamAvatarUrls = new Map();
 const steamAvatarPending = new Map();

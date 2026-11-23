@@ -10847,6 +10847,7 @@
     'Pick a folder on the left to name it, colour it or make it smart. Which way a grid opens folders, and when it goes back to the start, is set on the Shortcut grid widget.': 'Выберите папку слева, чтобы задать ей название, цвет или сделать умной. Как сетка открывает папки и когда возвращается к началу — настраивается у виджета «Сетка ярлыков».',
     'Delete the folder? Its keys stay.': 'Удалить папку? Ярлыки из неё останутся.',
     'Delete the folder': 'Удалить папку',
+    'The YouTube Music desktop app on the PC: the song and cover, like / dislike, play, skip, shuffle, repeat, volume and the queue. Fits any size: large it shows the queue beside the player, small just the cover and play. Needs the app\'s API Server plugin.': 'Приложение YouTube Music на ПК: трек и обложка, лайк и дизлайк, play, переключение, перемешивание, повтор, громкость и очередь. Подстраивается под размер: большой — плеер с очередью, маленький — обложка и play. Нужен плагин API Server в приложении.',
   });
 
   let pref = 'auto';

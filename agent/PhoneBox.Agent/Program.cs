@@ -96,6 +96,7 @@ AddMonitor<CalendarMonitor>(builder.Services);
 AddMonitor<DockerMonitor>(builder.Services);
 AddMonitor<ObsMonitor>(builder.Services);
 AddMonitor<DiscordMonitor>(builder.Services);
+builder.Services.AddSingleton<YtMusic>();
 AddMonitor<SteamMonitor>(builder.Services);
 AddMonitor<BatteryMonitor>(builder.Services);
 AddMonitor<RuleEngine>(builder.Services);
@@ -670,6 +671,13 @@ app.MapGet("/api/discord/img", async (string kind, string id, string hash, Disco
         ? Results.File(img.Data, img.Type, lastModified: null, entityTag: null, enableRangeProcessing: false) : Results.NotFound());
 app.MapPost("/api/discord/{action}", async (string action, string? channel, DiscordMonitor dc) =>
     await dc.ActAsync(action, channel) is { } error ? Results.BadRequest(new { error }) : Results.Ok(new { ok = true }));
+
+// YouTube Music through its desktop app (local tweak). The cover goes in the query string, like Discord's pictures.
+app.MapGet("/api/ytmusic", async (YtMusic yt, CancellationToken ct) => Results.Json(await yt.SnapshotAsync(ct)));
+app.MapGet("/api/ytmusic/img", async (string u, YtMusic yt, CancellationToken ct) =>
+    await yt.ImageAsync(u, ct) is { } img ? Results.File(img.Data, img.Type, lastModified: null, entityTag: null, enableRangeProcessing: false) : Results.NotFound());
+app.MapPost("/api/ytmusic/{action}", async (string action, double? value, YtMusic yt, CancellationToken ct) =>
+    await yt.ActAsync(action, value, ct) is { } error ? Results.BadRequest(new { error }) : Results.Ok(new { ok = true }));
 
 // Steam friends presence; the API key stays on the computer and only the public presence snapshot reaches the phone.
 app.MapGet("/api/steam", (SteamMonitor steam, ConfigStore cfg) =>

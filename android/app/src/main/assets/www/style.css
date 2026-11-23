@@ -113,6 +113,78 @@ button { font: inherit; color: inherit; background: none; border: 0; }
 #dots i.on { width: 16px; background: rgba(255, 255, 255, 0.7); }
 #dots.paused { border-color: rgba(245, 158, 11, 0.55); background: rgba(20, 16, 8, 0.78); }
 #dots.paused i.on { background: #f59e0b; }
+/* local tweak: the YouTube Music widget (pc.js). Large: player and queue side by side; it sheds parts as it shrinks */
+.w-ytmusic { background: linear-gradient(150deg, rgba(255, 0, 51, .16), var(--card) 55%); }
+.ytm { height: 100%; box-sizing: border-box; display: flex; gap: 18px; padding: 16px 18px; }
+.w-ytmusic.ytm-off .ytm { display: none; }
+.ytm-msg { display: none; height: 100%; align-items: center; justify-content: center; text-align: center; padding: 12px; color: var(--muted); font-size: 15px; }
+.w-ytmusic.ytm-off .ytm-msg { display: flex; }
+.ytm-main { flex: 1 1 56%; min-width: 0; display: flex; gap: 20px; }
+.ytm-cover { flex: none; width: clamp(110px, 52cqh, 300px); aspect-ratio: 1; align-self: flex-start; border-radius: 16px; overflow: hidden; background: linear-gradient(135deg, #c2185b, #1a1a1f); display: flex; align-items: center; justify-content: center; color: rgba(255, 255, 255, .8); box-shadow: 0 14px 36px rgba(0, 0, 0, .45); }
+.ytm-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ytm-cover > .ico { width: 34%; height: 34%; }
+.ytm-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.ytm-cap { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: #ff4e6b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ytm-title { font-size: clamp(16px, 7cqh, 30px); line-height: 1.15; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ytm-artist { font-size: clamp(13px, 4cqh, 17px); color: #b9bcc6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ytm-likes { display: flex; gap: 8px; }
+.ytm-b { flex: none; width: 52px; height: 52px; border-radius: 50%; border: none; background: rgba(255, 255, 255, .08); color: #fff; display: inline-flex; align-items: center; justify-content: center; }
+.ytm-b .ico { width: 22px; height: 22px; }
+.ytm-b.on { background: #ffffff; color: #0b0b0d; }
+.ytm-shuffle.on, .ytm-repeat.on { background: rgba(255, 0, 51, .22); color: #ff6b82; }
+.ytm-b:active { transform: scale(.93); }
+.ytm-play { width: 76px; height: 76px; background: #ffffff; color: #0b0b0d; }
+.ytm-play .ico { width: 32px; height: 32px; }
+.ytm-prog { margin-top: auto; display: flex; flex-direction: column; gap: 4px; }
+.ytm-bar, .ytm-vbar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .14); padding: 8px 0; background-clip: content-box; cursor: pointer; }
+.ytm-bar i, .ytm-vbar i { display: block; height: 6px; border-radius: 3px; background: #ff0033; }
+.ytm-vbar i { background: #e6e8ee; }
+.ytm-times { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ytm-ctl { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.ytm-vol { display: flex; align-items: center; gap: 10px; }
+.ytm-vol .ytm-b { width: 40px; height: 40px; background: transparent; }
+.ytm-vbar { flex: 1; }
+.ytm-vn { width: 40px; font-size: 13px; color: var(--muted); text-align: end; }
+.ytm-queue { flex: 1 1 44%; min-width: 0; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+.ytm-qlist { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; scrollbar-width: none; }
+.ytm-q { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 58px; padding: 5px 8px; border: none; border-radius: 12px; background: transparent; color: var(--text); font: inherit; text-align: start; }
+.ytm-q.cur { background: rgba(255, 0, 51, .14); }
+.ytm-qc { flex: none; width: 46px; height: 46px; border-radius: 8px; overflow: hidden; background: #2a2d36; display: inline-flex; align-items: center; justify-content: center; }
+.ytm-qc img { width: 100%; height: 100%; object-fit: cover; }
+.ytm-qc .ico { width: 18px; height: 18px; }
+.ytm-qt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ytm-qt b { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ytm-qt small { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ytm-ql { font-size: 12.5px; color: var(--muted); }
+@container (max-width: 900px) { .ytm-queue { display: none; } }
+@container (max-height: 400px) { .ytm-vol { display: none; } }
+@container (max-height: 330px) { .ytm-cap, .ytm-times { display: none; } .ytm-play { width: 60px; height: 60px; } .ytm-b { width: 44px; height: 44px; } }
+/* a bar, one or two rows high: cover, the song with its progress, the buttons */
+@container (max-height: 260px) {
+  .ytm { padding: 10px 14px; gap: 14px; }
+  .ytm-main { align-items: center; gap: 14px; }
+  .ytm-cover { width: auto; height: calc(100cqh - 20px); max-height: 200px; align-self: center; border-radius: 12px; box-shadow: none; }
+  .ytm-info { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 16px; row-gap: 4px; align-content: center; }
+  .ytm-title { grid-column: 1; -webkit-line-clamp: 1; font-size: clamp(15px, 17cqh, 24px); }
+  .ytm-artist { grid-column: 1; }
+  .ytm-prog { grid-column: 1; margin-top: 2px; }
+  .ytm-ctl { grid-column: 2; grid-row: 1 / span 3; gap: 8px; }
+  .ytm-likes { grid-column: 3; grid-row: 1 / span 3; align-self: center; }
+  .ytm-shuffle, .ytm-repeat, .ytm-dislike { display: none; }
+}
+@container (max-height: 260px) and (max-width: 760px) { .ytm-prev, .ytm-likes { display: none; } }
+@container (max-height: 260px) and (max-width: 420px) { .ytm-prog, .ytm-artist { display: none; } .ytm-next { display: none; } }
+/* tall and narrow: a card with the cover on top */
+@container (min-height: 261px) and (max-width: 560px) {
+  .ytm { padding: 14px; }
+  .ytm-main { flex-direction: column; gap: 12px; }
+  .ytm-cover { width: 100%; flex: 1; min-height: 0; aspect-ratio: auto; border-radius: 14px; }
+  .ytm-info { flex: none; gap: 8px; }
+  .ytm-cap, .ytm-vol, .ytm-likes, .ytm-times { display: none; }
+  .ytm-title { -webkit-line-clamp: 1; font-size: 18px; }
+}
+@container (min-height: 261px) and (max-width: 300px) { .ytm-shuffle, .ytm-repeat, .ytm-prev, .ytm-prog, .ytm-artist { display: none; } .ytm-ctl { justify-content: center; gap: 14px; } }
+
 /* local tweak: the floating page bar that replaces the dots on a tablet (main.js, buildNavbar) */
 body.has-navbar #dots { display: none; }
 body.has-navbar .page { padding-bottom: 90px; }
