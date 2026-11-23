@@ -39,8 +39,10 @@ if (-not $SkipApk) {
     # install a time limit
     Get-Process adb -ErrorAction SilentlyContinue | Stop-Process -Force
     Start-Sleep 1
-    Start-Process adb -ArgumentList 'start-server' -NoNewWindow -Wait
-    Start-Sleep 8
+    # not Start-Process -Wait: that waits for the adb daemon it starts too, which keeps running, so it never returns
+    $srv = Start-Job { adb start-server 2>&1 }
+    Wait-Job $srv -Timeout 20 | Out-Null
+    Start-Sleep 6
     $job = Start-Job { adb install -r $using:apk 2>&1 }
     if (Wait-Job $job -Timeout 120) { Receive-Job $job } else { Stop-Job $job; throw 'adb install timed out (try: adb kill-server)' }
     adb shell monkey -p net.oxog.phonebox.deskpanel -c android.intent.category.LAUNCHER 1 | Out-Null
