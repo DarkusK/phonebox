@@ -245,6 +245,10 @@ const ICONS = {
   pause: 'M6 4h4v16H6zM14 4h4v16h-4z',
   play: 'M6 3l14 9-14 9V3z',
   mic: 'M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 10v1a7 7 0 0 1-14 0v-1M12 18v4M8 22h8',
+  'mic-off': 'M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 10v1a7 7 0 0 1-14 0v-1M12 18v4M8 22h8|M3 3l18 18',
+  'headphone-off': 'M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3|M3 3l18 18',
+  'log-out': 'M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4|M10 17l-5-5 5-5|M5 12h12',
+  'chevron-down': 'm6 9 6 6 6-6',
   'alarm-clock': 'M4 13a8 8 0 1 0 16 0a8 8 0 1 0 -16 0|M12 9v4l2 2|M5 3 2 6|m22 6-3-3|M6.38 18.7 4 21|M17.64 18.67 20 21',
   'app-window': 'M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-16a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2z|M10 4v4|M2 8h20|M6 4v4',
   'arrow-left-right': 'M8 3 4 7l4 4|M4 7h16|m16 21 4-4-4-4|M20 17H4',
@@ -1398,7 +1402,7 @@ export function handleEvent(e) {
   else if (e.kind === 'reload') location.reload();
 }
 
-export const WIDGET_ICONS = { camera: '📹', dictate: '🎙️', spectrum: '📶', 'app-console': '🎛️', discord: '💬', steam: '👥', 'steam-activity': '🔔', rules: '⚡', chargecare: '🔋', nextup: '⏭️', moon: '🌙', wordclock: '🔤', clock: '🕒', weather: '⛅', forecast: '🌦️', media: '🎵', stat: '📈', gauge: '⏲️', chart: '📊', meters: '💾', gpu: '🎮', quotas: '✳️', sessions: '🤖',
+export const WIDGET_ICONS = { camera: '📹', dictate: '🎙️', spectrum: '📶', 'app-console': '🎛️', discord: '💬', 'discord-bar': '🔊', steam: '👥', 'steam-activity': '🔔', rules: '⚡', chargecare: '🔋', nextup: '⏭️', moon: '🌙', wordclock: '🔤', clock: '🕒', weather: '⛅', forecast: '🌦️', media: '🎵', stat: '📈', gauge: '⏲️', chart: '📊', meters: '💾', gpu: '🎮', quotas: '✳️', sessions: '🤖',
   github: '🐙', processes: '⚙️', shortcuts: '🎛️', button: '🔘', worldclock: '🌍', calendar: '📅', pomodoro: '🍅', countdown: '⏳', note: '📝', command: '💻',
   push: '📡', inbox: '📬', label: '🔤', analog: '🕰️', progress: '📆', stopwatch: '⏱️', timer: '⏲️', counter: '🔢', breathe: '🫁', quote: '💬',
   checklist: '✅', battery: '🔋', topprocs: '🔥', quotaring: '🎯', volume: '🔊', sun: '🌅', air: '🍃', hackernews: '📰', feeds: '🗞️', photos: '🖼️', exchange: '💱', crypto: '🪙', image: '🖼️', pcswitch: '🖥️' };
@@ -1455,7 +1459,7 @@ export function buildLayout() {
       const at = pl?.pos.get(w) || w;
       box.style.gridArea = `${at.y + 1} / ${at.x + 1} / span ${at.h} / span ${at.w}`;
       grid.appendChild(box);
-      const ctx = { page: p, w, o: w.options || {}, box, appearance };
+      const ctx = { page: p, w, o: w.options || {}, box, appearance, at, reflow: () => reflowPage(pi) };
       let inst;
       try { inst = def.create(box, ctx) || {}; } catch (e) { box.replaceChildren(h('div', 'empty', `${w.type}: ${e.message}`)); inst = {}; }
       PhoneBoxAppearance.widget(box, appearance);
@@ -1475,6 +1479,26 @@ export function buildLayout() {
   curPage = -1;
   goPage(idx, true);
   requestAnimationFrame(() => setActive(true));
+}
+
+/** A widget that hides itself (box.hidden) gives its cells away: the widgets right below it whose columns lie within
+ *  its own grow up into its rows; with none below, the ones right above grow down. Shown again, all go back. */
+export function reflowPage(pi) {
+  const items = mounted.filter((m) => m.pi === pi);
+  const area = new Map(items.map((m) => [m, { ...m.ctx.at }]));
+  for (const gone of items.filter((m) => m.ctx.box.hidden)) {
+    const g = gone.ctx.at;
+    const inside = (a) => a.x >= g.x && a.x + a.w <= g.x + g.w;
+    const shown = items.filter((m) => m !== gone && !m.ctx.box.hidden);
+    const below = shown.filter((m) => inside(area.get(m)) && area.get(m).y === g.y + g.h);
+    const above = shown.filter((m) => inside(area.get(m)) && area.get(m).y + area.get(m).h === g.y);
+    for (const m of below.length ? below : above) {
+      const a = area.get(m);
+      if (below.length) a.y = g.y;
+      a.h += g.h;
+    }
+  }
+  for (const m of items) { const a = area.get(m); m.ctx.box.style.gridArea = `${a.y + 1} / ${a.x + 1} / span ${a.h} / span ${a.w}`; }
 }
 
 export function activeSet() { return new Set([curPage - 1, curPage, curPage + 1]); }
@@ -1546,6 +1570,7 @@ export function showPagePauseFeedback(paused) {
 export function syncPagePauseUi() {
   const dots = $('dots');
   if (dots) dots.classList.toggle('paused', pagePaused);
+  document.querySelector('.navbar')?.classList.toggle('paused', pagePaused);
   if (pagePauseBtn) {
     pagePauseBtn.classList.toggle('on', pagePaused);
     pagePauseBtn.setAttribute('aria-label', t('panel.pagePause'));
@@ -1586,6 +1611,7 @@ export function buildDots() {
     dots.replaceChildren();
     dots.classList.remove('paused');
     dots.hidden = true;
+    buildNavbar();
     return;
   }
   pagePauseBtn = h('button', 'page-pause',
@@ -1599,10 +1625,97 @@ export function buildDots() {
   dots.replaceChildren(...pages.map(() => h('i')), pagePauseBtn);
   dots.hidden = false;
   syncPagePauseUi();
+  buildNavbar();
 }
 
 export function updateDots() {
   $('dots').querySelectorAll('i').forEach((d, i) => d.classList.toggle('on', i === curPage));
+  updateNavbar();
+}
+
+// local tweak: on a tablet-sized landscape screen the page dots become one floating bar: the time and the PC on the
+// left, the pages as a dock that swipes sideways in the middle, the phone's battery and the page pause on the right.
+// Tap a page to go there, tap the time for the overview, hold the dock to pause page switching (as on the dots).
+let nbBar = null, navDock = null, nbTimer = 0;
+const navbarWanted = () => pages.length >= 2 && !isPortrait() && window.innerWidth >= 900 && !document.body.classList.contains('controls-top');
+export function buildNavbar() {
+  const on = navbarWanted();
+  document.body.classList.toggle('has-navbar', on);
+  if (!on) {
+    if (nbBar) { nbBar.remove(); nbBar = navDock = null; clearInterval(nbTimer); }
+    if (pagePauseBtn && !pagePauseBtn.isConnected) $('dots').appendChild(pagePauseBtn);
+    return;
+  }
+  if (!nbBar) {
+    nbBar = h('nav', 'navbar');
+    nbBar.setAttribute('aria-label', t('panel.allPages'));
+    document.body.appendChild(nbBar);
+    nbTimer = setInterval(updateNavStatus, 1000);
+  }
+  const info = h('button', 'nb-info', h('b', 'nb-time'), h('span', 'nb-pc', h('i', 'nb-dot'), h('span', 'nb-host')));
+  info.addEventListener('click', () => openOverview());
+  navDock = h('div', 'nb-dock', ...pages.map((p, i) => {
+    const b = labelled(h('button', 'nb-page', h('span', 'nb-ico', emo(p.icon || '◻')), h('span', 'nb-name', p.title || '')), p.title || '');
+    b.addEventListener('click', (e) => {
+      if (heldNav) { heldNav = false; e.preventDefault(); return; }
+      haptic(); goPage(i);
+    });
+    return b;
+  }));
+  navDock.addEventListener('scroll', fadeNav, { passive: true });
+  navDock.addEventListener('pointerdown', (e) => {
+    heldNav = false; clearTimeout(navHold);
+    navHoldAt = [e.clientX, e.clientY];
+    navHold = setTimeout(() => { navHold = 0; heldNav = true; togglePagePaused(); }, 450);
+  });
+  navDock.addEventListener('pointermove', (e) => { if (navHold && Math.hypot(e.clientX - navHoldAt[0], e.clientY - navHoldAt[1]) > 10) { clearTimeout(navHold); navHold = 0; } });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach((ev) => navDock.addEventListener(ev, () => { clearTimeout(navHold); navHold = 0; }));
+  const right = h('div', 'nb-right', h('span', 'nb-bat'));
+  if (pagePauseBtn) right.appendChild(pagePauseBtn);
+  nbBar.replaceChildren(info, h('i', 'nb-sep'), navDock, h('i', 'nb-sep'), right);
+  syncPagePauseUi();
+  updateNavStatus();
+  updateNavbar(true);
+}
+let navHold = 0, navHoldAt = [0, 0], heldNav = false;
+function fadeNav() {
+  if (!navDock) return;
+  navDock.classList.toggle('fl', navDock.scrollLeft > 4);
+  navDock.classList.toggle('fr', navDock.scrollLeft + navDock.clientWidth < navDock.scrollWidth - 4);
+}
+function updateNavbar(instant = false) {
+  if (!navDock) return;
+  const keys = [...navDock.children];
+  keys.forEach((b, i) => b.classList.toggle('on', i === curPage));
+  const b = keys[curPage];
+  // the open page slides to the middle of the dock
+  if (b) requestAnimationFrame(() => {
+    navDock.scrollTo({ left: b.offsetLeft - (navDock.clientWidth - b.offsetWidth) / 2, behavior: instant ? 'auto' : 'smooth' });
+    fadeNav();
+  });
+}
+function updateNavStatus() {
+  if (!nbBar) return;
+  const via = transport();
+  nbBar.querySelector('.nb-time').textContent = fmtHM(new Date());
+  nbBar.querySelector('.nb-dot').className = 'nb-dot ' + (online ? 'on' : online === false ? 'off' : '');
+  nbBar.querySelector('.nb-host').textContent = online
+    ? (D.state?.host || 'PC') + (via === 'wifi' ? ' · ' + t('status.wiFi') : via === 'usb' ? ' · ' + t('status.usb') : '')
+    : online === false ? t('panel.pcNotConnected') : t('panel.connecting');
+  const bat = nbBar.querySelector('.nb-bat');
+  let b = null;
+  try { b = bridge ? JSON.parse(bridge.battery()) : null; } catch (_) {}
+  bat.hidden = !(b && b.level >= 0);
+  if (!bat.hidden) {
+    const key = b.level + ':' + !!b.plugged;
+    if (bat.dataset.k !== key) {
+      bat.dataset.k = key;
+      const lv = h('i', 'nb-lv');
+      lv.style.width = Math.max(4, Math.min(100, b.level)) + '%';
+      bat.replaceChildren(h('span', 'nb-cell', lv), h('b', null, b.level + '%'), b.plugged ? icon('zap', 'nb-zap') : '');
+      bat.classList.toggle('low', b.level <= 20);
+    }
+  }
 }
 
 export let snapTimer = 0;
@@ -2059,7 +2172,7 @@ window.onAndroidBack = () => {
   else if (curPage !== homeIndex()) goPage(homeIndex(), true);
   else openOverview();
 };
-window.addEventListener('resize', () => { buildLayout(); goPage(curPage, true); });
+window.addEventListener('resize', () => { buildLayout(); buildNavbar(); goPage(curPage, true); });
 
 ['pointerdown', 'touchstart'].forEach((ev) => document.addEventListener(ev, (e) => {
   if (dimmed) wakeFromDim();

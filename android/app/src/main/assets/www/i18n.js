@@ -10802,6 +10802,16 @@
     if (data.panel) PANEL[lang] = { ...PANEL[lang], ...data.panel };
   }
   delete window.PhoneBoxLocaleData;
+  // local tweak: the Discord focus layout and the current-channel bar in the Russian catalog
+  CATALOG.ru = Object.assign(CATALOG.ru || {}, {
+    'Layout': 'Раскладка',
+    'Servers and channels': 'Серверы и каналы',
+    'Current channel, call buttons and channels side by side': 'Текущий канал, кнопки звонка и каналы рядом',
+    'Discord current channel': 'Discord: текущий канал',
+    'The voice channel you are in, who is there and mute / deafen / leave, as a bar that fits any size; it can hide itself outside a channel.': 'Голосовой канал, в котором вы сейчас, участники и кнопки микрофона, звука и выхода. Подстраивается под любой размер и может скрываться вне канала.',
+    'Hide outside a voice channel (the widgets next to it take its place)': 'Скрывать вне голосового канала (соседние виджеты занимают его место)',
+    'Allow mute, deafen and leave from the phone': 'Разрешить микрофон, звук и выход с телефона',
+  });
 
   let pref = 'auto';
   let active = 'en';

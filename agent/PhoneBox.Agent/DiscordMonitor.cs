@@ -534,9 +534,9 @@ public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMo
         finally { _act.Release(); }
     }
 
-    /// <summary>Control needs a Discord widget with the control option on, on a page that is enabled.</summary>
+    /// <summary>Control needs a Discord widget (or the current-channel bar) with the control option on, on a page that is enabled.</summary>
     public static bool ControlAllowed(AgentConfig cfg) =>
-        cfg.Widgets(enabledPagesOnly: true).Any(w => w.Type == "discord" && w.Bool("control") == true);
+        cfg.Widgets(enabledPagesOnly: true).Any(w => (w.Type == "discord" || w.Type == "discord-bar") && w.Bool("control") == true);
 
     // Discord answers a settings change with the new settings; take the state from that, not from the next poll.
     internal void ApplyVoice(JsonNode? vs)

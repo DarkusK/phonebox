@@ -97,14 +97,15 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 .seg button { border: 0; background: var(--panel); padding: 6px 13px; cursor: pointer; font: inherit; font-size: 13px; color: var(--text); }
 .seg button.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
 #pageEditor.live .layout-hint { display: none; }
-.preview { position: relative; aspect-ratio: 780 / 360; overflow: hidden; border-radius: 10px; background: #000; }
-.preview iframe { position: absolute; left: 0; top: 0; width: 780px; height: 360px; border: 0; transform-origin: 0 0; }
+/* local tweak: preview sized for a Galaxy Tab A7 (2000×1200 px at 1.5× = 1333×800 CSS px) instead of a phone */
+.preview { position: relative; aspect-ratio: 1333 / 800; overflow: hidden; border-radius: 10px; background: #000; }
+.preview iframe { position: absolute; left: 0; top: 0; width: 1333px; height: 800px; border: 0; transform-origin: 0 0; }
 .phone { width: 100%; max-width: 860px; padding: 14px 18px; border-radius: 28px; background: #06080b; border: 1px solid #22262e; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
 /* Match the panel's saved grid coordinates regardless of the interface language. */
 [dir="rtl"] .canvas, [dir="rtl"] .mini { direction: ltr; }
 [dir="rtl"] .canvas > *, [dir="rtl"] .mini > * { direction: rtl; }
 [dir="rtl"] input[type="url"], [dir="rtl"] input[type="number"], [dir="rtl"] code { direction: ltr; unicode-bidi: isolate; }
-.canvas { position: relative; aspect-ratio: 752 / 333; display: grid; grid-template-columns: repeat(12, 1fr); grid-template-rows: repeat(6, 1fr); gap: 6px; touch-action: none; }
+.canvas { position: relative; aspect-ratio: 1309 / 776; display: grid; grid-template-columns: repeat(12, 1fr); grid-template-rows: repeat(6, 1fr); gap: 6px; touch-action: none; }
 .canvas .cell { border-radius: 6px; background: rgba(255,255,255,.035); }
 .wb { position: relative; z-index: 1; border-radius: 10px; background: #1a2230; border: 1.5px solid #2c3647; color: #e8ecf1; cursor: grab; overflow: hidden; display: flex; container-type: size; }
 .wb:active { cursor: grabbing; }
@@ -139,7 +140,7 @@ textarea { width: 100%; resize: vertical; }
 .tpl { display: flex; flex-direction: column; gap: 4px; text-align: start; padding: 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel-2); cursor: pointer; }
 .tpl:hover { border-color: var(--accent); }
 .tpl small { color: var(--muted); font-size: 12px; }
-.mini { aspect-ratio: 2.26; display: grid; grid-template-columns: repeat(12, 1fr); grid-template-rows: repeat(6, 1fr); gap: 2px; background: #06080b; border-radius: 8px; padding: 4px; margin-bottom: 4px; }
+.mini { aspect-ratio: 1.69; display: grid; grid-template-columns: repeat(12, 1fr); grid-template-rows: repeat(6, 1fr); gap: 2px; background: #06080b; border-radius: 8px; padding: 4px; margin-bottom: 4px; }
 .mini span { background: #1f2937; border-radius: 3px; display: grid; place-items: center; font-size: 12px; overflow: hidden; }
 .empty-mini { display: grid; place-items: center; font-size: 28px; color: #64748b; }
 /* webhooks */
@@ -1419,7 +1420,7 @@ function setStage(mode) {
   if (live && !previewFrame) {
     previewFrame = h('iframe', { src: '../panel/?preview=1', title: 'Live preview of the panel' });
     $('previewBox').appendChild(previewFrame);
-    const fit = () => { previewFrame.style.transform = `scale(${$('previewBox').clientWidth / 780})`; };
+    const fit = () => { previewFrame.style.transform = `scale(${$('previewBox').clientWidth / 1333})`; };
     new ResizeObserver(fit).observe($('previewBox'));
     fit();
   }
@@ -3316,7 +3317,7 @@ function renderAppearanceSettings() {
       appearancePreviewFrame = h('iframe', { src: '../panel/?preview=1', title: 'Live appearance preview' });
       preview.append(appearancePreviewFrame);
       const frame = appearancePreviewFrame;
-      appearancePreviewObserver = new ResizeObserver(() => { frame.style.transform = 'scale(' + preview.clientWidth / 780 + ')'; });
+      appearancePreviewObserver = new ResizeObserver(() => { frame.style.transform = 'scale(' + preview.clientWidth / 1333 + ')'; });
       appearancePreviewObserver.observe(preview);
     }
     queuePreview();

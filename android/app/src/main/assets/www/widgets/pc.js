@@ -129,6 +129,27 @@ W.obs = {
   },
 };
 
+// local tweak: the Discord "focus" layout and the current-channel bar speak Russian when the panel does
+const dcL = (en, ru) => (String(LOCALE || '').toLowerCase().startsWith('ru') ? ru : en);
+const dcImg = (kind, id, hash) => `${API}/discord/img?kind=${kind}&id=${encodeURIComponent(id)}&hash=${encodeURIComponent(hash)}`;
+// a round logo: the image once it has loaded, the first letter until then (and when there is no image)
+const dcIco = (src, name, cls = 'dc-ico') => {
+  const w = h('span', cls, (name || '?').trim().charAt(0).toUpperCase() || '?');
+  if (src) { const im = new Image(); im.alt = ''; im.onload = () => w.replaceChildren(im); im.src = src; }
+  return w;
+};
+const dcGid = (c) => c.guildId || c.guild || 'other';
+// servers picked or joined lately, newest first: the focus layout shows them next to the server switcher
+const dcRecent = (gid) => { if (gid) store.set('dc-recent', [gid, ...store.get('dc-recent', []).filter((g) => g !== gid)].slice(0, 6)); return store.get('dc-recent', []); };
+const dcCall = (kind, s) => {
+  // Discord mutes the microphone while you are deafened, so the mic shows off then too
+  const on = kind === 'mute' ? s.muted || s.deafened : kind === 'deafen' ? s.deafened : false;
+  const ic = kind === 'mute' ? (on ? 'mic-off' : 'mic') : kind === 'deafen' ? (on ? 'headphone-off' : 'headphones') : 'log-out';
+  const label = kind === 'mute' ? (on ? dcL('Mic off', 'Микрофон выкл.') : dcL('Mic', 'Микрофон'))
+    : kind === 'deafen' ? (on ? dcL('Sound off', 'Звук выкл.') : dcL('Sound', 'Звук')) : dcL('Leave', 'Выйти');
+  return { on, ic, label };
+};
+
 // Discord through the desktop app on the PC: the voice channel / call you are in, who is there, mute / deafen / leave,
 // voice channels to join and recent notifications. Buttons only work when the widget allows control.
 W.discord = {
@@ -159,10 +180,74 @@ W.discord = {
     // redraw recreates every avatar and server icon and they flash while they load again.
     const rings = new Map();
     const ring = () => { for (const m of data?.snapshot?.members || []) rings.get(m.id)?.classList.toggle('speaking', !!m.speaking); };
+    // The "focus" layout (local tweak): the server, the channel you are in with who is there and big call buttons on
+    // the left; the chosen server's voice channels (or, from the switcher, all servers) on the right.
+    let sel = null, picking = false, seenChannel = null;
+    const renderFocus = (s, ctl) => {
+      const servers = new Map();
+      for (const c of s.channels) { const g = dcGid(c); if (!servers.has(g)) servers.set(g, []); servers.get(g).push(c); }
+      const here = s.channelId ? s.channels.find((c) => c.id === s.channelId) : null;
+      if (s.channelId !== seenChannel) {
+        seenChannel = s.channelId;
+        if (here) { sel = dcGid(here); dcRecent(sel); store.set('dc-last', { id: here.id, name: here.name, guild: here.guild || '' }); }
+      }
+      if (!sel || !servers.has(sel)) sel = dcRecent().find((g) => servers.has(g)) || servers.keys().next().value || null;
+      const sname = (gid) => servers.get(gid)?.[0]?.guild || t('w.discord.otherServer');
+      const gico = (gid) => { const c = servers.get(gid)?.[0]; return dcIco(c?.guildIcon && c?.guildId && dcImg('guild', c.guildId, c.guildIcon), sname(gid), 'dcf-sico'); };
+      const pick = (gid) => { haptic(); sel = gid; picking = false; dcRecent(gid); render(true); };
+      const switcher = h('button', 'dcf-switch' + (picking ? ' open' : ''), sel ? gico(sel) : null, h('span', 'dcf-sname', sel ? sname(sel) : dcL('Servers', 'Серверы')), icon('chevron-down'));
+      switcher.addEventListener('click', () => { haptic(); picking = !picking; render(true); });
+      const recents = dcRecent().filter((g) => g !== sel && servers.has(g)).slice(0, 3).map((g) => {
+        const b = labelled(h('button', 'dcf-recent', gico(g)), sname(g));
+        b.addEventListener('click', () => pick(g));
+        return b;
+      });
+      let mid;
+      if (s.channelId) {
+        mid = h('div', 'dcf-now', h('span', 'dcf-label', dcL('Voice channel', 'Голосовой канал')), h('div', 'dcf-name', s.channelName || ''),
+          h('div', 'dcf-chips', ...s.members.map((m) => {
+            const chip = h('span', 'dcf-chip' + (m.speaking ? ' speaking' : '') + (m.deafened ? ' deaf' : m.muted ? ' muted' : ''),
+              dcIco(m.avatar && dcImg('user', m.id, m.avatar), m.name, 'dcf-av'), h('span', null, m.name));
+            rings.set(m.id, chip);
+            return chip;
+          })));
+      } else {
+        const last = store.get('dc-last', null);
+        const back = last && s.channels.some((c) => c.id === last.id)
+          ? h('button', 'dcf-back', icon('rotate-ccw'), h('span', null, dcL('Back to ', 'Вернуться: ') + last.name + (last.guild ? ' · ' + last.guild : ''))) : null;
+        if (back) { if (ctl && !busy) back.addEventListener('click', () => act('join', last.id)); else back.disabled = true; }
+        mid = h('div', 'dcf-empty', h('span', 'dcf-eico', icon('volume-x')), h('div', 'dcf-name', dcL('Not in a voice channel', 'Не в голосовом канале')),
+          h('div', 'dcf-hint', dcL('Tap a channel to join', 'Нажмите канал, чтобы войти')), back);
+      }
+      const call = (kind) => {
+        const { on, ic, label } = dcCall(kind, s);
+        const b = h('button', `dcf-call ${kind}` + (on ? ' on' : '') + (busy === kind ? ' busy' : ''), h('span', 'dcf-disc', icon(ic)), h('span', 'dcf-cl', label));
+        if (ctl && !busy && (kind !== 'leave' || s.channelId)) b.addEventListener('click', () => act(kind)); else b.disabled = true;
+        return b;
+      };
+      const left = h('div', 'dcf-left', h('div', 'dcf-top', switcher, ...recents), mid, h('div', 'dcf-calls', call('mute'), call('deafen'), call('leave')));
+      let right;
+      if (picking) {
+        right = h('div', 'dcf-right', h('div', 'dcf-cap', dcL('Servers', 'Серверы')), h('div', 'dcf-grid', ...[...servers.keys()].map((g) => {
+          const b = h('button', 'dcf-srv' + (g === sel ? ' cur' : ''), gico(g), h('span', null, sname(g)));
+          b.addEventListener('click', () => pick(g));
+          return b;
+        })));
+      } else {
+        const chans = [...(servers.get(sel) || [])].sort((a, b) => (b.id === s.channelId) - (a.id === s.channelId));
+        right = h('div', 'dcf-right', h('div', 'dcf-cap', dcL('Channels · ', 'Каналы · ') + (sel ? sname(sel) : '')), h('div', 'dcf-grid', ...chans.map((c) => {
+          const b = h('button', 'dcf-chan' + (c.id === s.channelId ? ' cur' : '') + (busy === 'join' + c.id ? ' busy' : ''), icon('volume-2'), h('span', null, c.name));
+          if (ctl && !busy && c.id !== s.channelId) b.addEventListener('click', () => act('join', c.id));
+          return b;
+        })));
+      }
+      box.replaceChildren(left, right);
+    };
+    if (o.layout === 'focus') box.classList.add('dcf');
     const render = (force = false) => {
       const s0 = data?.snapshot;
       const quiet = s0?.members ? { ...data, snapshot: { ...s0, members: s0.members.map(({ speaking, ...m }) => m) } } : data;
-      const key = JSON.stringify([quiet, busy, [...open], box.clientHeight]);
+      const key = JSON.stringify([quiet, busy, [...open], box.clientHeight, box.clientWidth, sel, picking]);
       if (!force && key === lastKey) { ring(); return; }
       lastKey = key;
       rings.clear();
@@ -171,6 +256,7 @@ W.discord = {
       const s = data.snapshot;
       if (!s.connected) { box.replaceChildren(h('div', 'w-title', en('Discord')), h('div', 'empty', s.error || t('panel.connecting'))); return; }
       const ctl = data.control;
+      if (o.layout === 'focus') { renderFocus(s, ctl); return; }
       const btn = (cls, label, on, action) => {
         const b = labelled(h('button', 'dc-btn ' + cls + (on ? ' on' : '') + (busy === action ? ' busy' : ''), label),
           t({ mute: on ? 'w.a.unmuteMic' : 'w.a.muteMic', deafen: on ? 'w.a.undeafen' : 'w.a.deafen', leave: 'w.a.leave' }[action]));
@@ -180,7 +266,7 @@ W.discord = {
       const kids = [h('div', 'dc-top',
         h('span', 'dc-where', s.channelName ? `${s.channelName}` : t('w.discord.notInChannel')),
         s.channelKind ? h('span', 'dc-kind', s.channelKind) : null,
-        btn('mute', emo(s.muted ? '🔇' : '🎙️'), s.muted, 'mute'), btn('deaf', emo(s.deafened ? '🔕' : '🎧'), s.deafened, 'deafen'),
+        btn('mute', emo(s.muted || s.deafened ? '🔇' : '🎙️'), s.muted || s.deafened, 'mute'), btn('deaf', emo(s.deafened ? '🔕' : '🎧'), s.deafened, 'deafen'),
         s.channelId ? btn('leave', emo('📞'), false, 'leave') : null)];
       if (s.channelId && s.members.length) {
         kids.push(h('div', 'dc-members', ...s.members.map((m) => {
@@ -241,6 +327,77 @@ W.discord = {
       load().then(() => { asking = false; next = Date.now() + (data?.snapshot?.channelId ? 500 : 2000); render(); });
     };
     // 'fast' (every 250 ms) drives the asking; 'tick' (every second) also redraws when the widget's size changes
+    return { update: (kind) => { poll(); if (kind !== 'fast') render(); } };
+  },
+};
+
+// The voice channel you are in as a bar any page can hold (local tweak): the channel, who is there and mute / deafen /
+// leave. Its layout follows its size in the grid (style.css, container queries); outside a channel it hides and the
+// widgets next to it take its cells (reflowPage in main.js), unless "autoHide" is off.
+W['discord-bar'] = {
+  needs: ['tick', 'fast'],
+  create(box, { o, page, reflow }) {
+    let data = null, lastKey = '', busy = null;
+    const rings = new Map();
+    const load = async () => { try { data = await api('/discord'); } catch (_) {} };
+    const act = async (action) => {
+      if (busy) return;
+      haptic();
+      busy = action; render(true);
+      try {
+        const r = await fetch(`${API}/discord/${action}`, { method: 'POST', cache: 'no-store', headers: PANEL_HEADERS });
+        if (!r.ok) toast((await r.json().catch(() => ({}))).error || t('w.discord.failed'), 'err');
+      } catch (_) { toast(t('panel.pcNoAnswer'), 'err'); }
+      await new Promise((done) => setTimeout(done, 600));
+      await load(); busy = null; render(true);
+    };
+    const hide = (v) => { if (box.hidden !== v) { box.hidden = v; reflow?.(); } };
+    const render = (force = false) => {
+      const s = data?.snapshot;
+      if (!s?.channelId || !data.enabled || !s.connected) {
+        lastKey = '';
+        // hide only once the agent has answered, so the bar doesn't blink away while the page loads
+        if (o.autoHide !== false && data) { hide(true); return; }
+        hide(false);
+        box.replaceChildren(h('div', 'empty', !data ? t('w.loading') : !data.enabled ? t('w.discord.turnOn') : !s.connected ? (s.error || t('panel.connecting')) : dcL('Not in a voice channel', 'Не в голосовом канале')));
+        return;
+      }
+      hide(false);
+      const quiet = { ...s, members: s.members.map(({ speaking, ...m }) => m), notifications: null };
+      const key = JSON.stringify([quiet, data.control, busy]);
+      if (!force && key === lastKey) { for (const m of s.members) rings.get(m.id)?.classList.toggle('speaking', !!m.speaking); return; }
+      lastKey = key;
+      rings.clear();
+      const ctl = data.control;
+      const here = s.channels.find((c) => c.id === s.channelId);
+      const av = (m) => dcIco(m.avatar && dcImg('user', m.id, m.avatar), m.name, 'dcb-av');
+      const chips = s.members.map((m) => h('span', 'dcb-chip' + (m.speaking ? ' speaking' : ''), av(m), h('span', null, m.name)));
+      const stack = s.members.slice(0, 5).map((m) => { const a = av(m); if (m.speaking) a.classList.add('speaking'); return a; });
+      // one ring map entry per member: the chip (names shown) or the stacked avatar, whichever the size shows
+      s.members.forEach((m, i) => rings.set(m.id, { classList: { toggle: (c, v) => { chips[i].classList.toggle(c, v); stack[i]?.classList.toggle(c, v); } } }));
+      const btn = (kind) => {
+        const { on, ic, label } = dcCall(kind, s);
+        const b = labelled(h('button', `dcb-btn ${kind}` + (on ? ' on' : '') + (busy === kind ? ' busy' : ''), icon(ic), h('span', 'dcb-l', label)), label);
+        if (ctl && !busy) b.addEventListener('click', () => act(kind)); else b.disabled = true;
+        return b;
+      };
+      box.replaceChildren(h('div', 'dcb',
+        h('div', 'dcb-info',
+          h('div', 'dcb-head', icon('volume-2', 'dcb-vi'), h('b', 'dcb-name', s.channelName || ''), here?.guild ? h('span', 'dcb-guild', here.guild) : null),
+          h('div', 'dcb-chips', ...chips),
+          h('div', 'dcb-stack', ...stack, s.members.length > 5 ? h('span', 'dcb-av dcb-more', '+' + (s.members.length - 5)) : null)),
+        h('div', 'dcb-btns', btn('mute'), btn('deafen'), btn('leave'))));
+    };
+    const visible = () => box.isConnected && !document.hidden && pages[curPage] === page && !box.closest('.stack-item:not(.active)');
+    let next = 0, asking = false, shown = false;
+    const poll = () => {
+      const now = visible();
+      if (now && !shown) next = 0;
+      shown = now;
+      if (asking || !now || Date.now() < next) return;
+      asking = true;
+      load().then(() => { asking = false; next = Date.now() + (data?.snapshot?.channelId ? 500 : 2000); render(); });
+    };
     return { update: (kind) => { poll(); if (kind !== 'fast') render(); } };
   },
 };
