@@ -230,7 +230,11 @@ const dcFocus = {
       shareWaiting++;
       try {
         const r = await api('/discord/share' + (apps ? '?apps=true' : ''), undefined, 8000);
-        if (n > shareUsed) { shareUsed = n; share = apps ? r : { ...r, apps: share?.apps ?? null }; }
+        if (n > shareUsed) {
+          shareUsed = n;
+          // an app list that comes back after the share tab was left keeps only the state: no name, no apps
+          share = apps && tab === 'share' ? r : { ...r, name: apps ? null : r.name, apps: apps ? null : share?.apps ?? null };
+        }
       } catch (_) {} finally { shareWaiting--; }
     };
     const loadChat = async () => {
@@ -379,7 +383,8 @@ const dcFocus = {
       const gico = (gid) => { const c = servers.get(gid)?.[0]; return dcIco(c?.guildIcon && c?.guildId && dcImg('guild', c.guildId, c.guildIcon), sname(gid), 'dcf-sico'); };
       const pick = (gid) => { haptic(); sel = gid; picking = false; dcRecent(gid); render(true); };
       const switcher = h('button', 'dcf-switch' + (picking ? ' open' : ''), sel ? gico(sel) : null, h('span', 'dcf-sname', sel ? sname(sel) : t('w.discord.servers')), icon('chevron-down'));
-      switcher.addEventListener('click', () => { haptic(); picking = !picking; tab = 'chan'; render(true); });
+      // through openTab, so leaving the share tab for the server list drops the shared app's name and the app list too
+      switcher.addEventListener('click', () => { haptic(); const open = !picking; openTab('chan'); picking = open; render(true); });
       const recents = dcRecent().filter((g) => g !== sel && servers.has(g)).slice(0, 3).map((g) => {
         const b = labelled(h('button', 'dcf-recent', gico(g)), sname(g));
         b.addEventListener('click', () => pick(g));

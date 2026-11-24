@@ -1378,7 +1378,8 @@ html.beat-4 .obs-pill.on .obs-led { box-shadow: 0 0 34px rgba(239, 68, 68, .9); 
 /* less room: Sound goes first, then Chat, then Stop (Mic and Leave stay) */
 @container (max-width: 640px) { .dcb-btns.n5 .dcb-btn.deafen { display: none; } }
 @container (max-width: 560px) { .dcb-btns.n4 .dcb-btn.deafen, .dcb-btns.n5 .dcb-btn.chat { display: none; } .dcb-sub { display: none; } }
-@container (max-width: 460px) { .dcb-btns .dcb-btn.chat, .dcb-btns .dcb-btn.share { display: none; } }
+/* while you share, Stop stays at every size: only the Screen button that opens the share view gives way */
+@container (max-width: 460px) { .dcb-btns .dcb-btn.chat, .dcb-btns .dcb-btn.share:not(.live) { display: none; } }
 @container (max-width: 900px) {
   .dcb-l { display: none; }
   .dcb-btn { width: 48px; height: 48px; padding: 0; }
