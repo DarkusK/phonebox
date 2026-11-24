@@ -370,6 +370,8 @@ const dcFocus = {
     };
 
     const renderFocus = (s, ctl) => {
+      // screen share switched off (or the Discord widget's Control): nothing of it is kept, the shared app's name included
+      if (!data.share) share = null;
       const servers = new Map();
       for (const c of s.channels) { const g = dcGid(c); if (!servers.has(g)) servers.set(g, []); servers.get(g).push(c); }
       const here = s.channelId ? s.channels.find((c) => c.id === s.channelId) : null;
