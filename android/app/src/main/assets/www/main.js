@@ -1701,17 +1701,25 @@ export function buildDots() {
 export function reflowPage(pi) {
   const items = mounted.filter((m) => m.pi === pi);
   const area = new Map(items.map((m) => [m, { ...m.ctx.at }]));
-  for (const gone of items.filter((m) => m.ctx.box.hidden)) {
-    const g = gone.ctx.at;
-    const inside = (a) => a.x >= g.x && a.x + a.w <= g.x + g.w;
-    const shown = items.filter((m) => m !== gone && !m.ctx.box.hidden);
-    const below = shown.filter((m) => inside(area.get(m)) && area.get(m).y === g.y + g.h);
-    const above = shown.filter((m) => inside(area.get(m)) && area.get(m).y + area.get(m).h === g.y);
-    for (const m of below.length ? below : above) {
-      const a = area.get(m);
-      if (below.length) a.y = g.y;
-      a.h += g.h;
-    }
+  const shown = items.filter((m) => !m.ctx.box.hidden);
+  // Rows a hidden widget leaves are taken by a neighbour; a neighbour that grows can reach the next hidden one (two
+  // hidden bars stacked above a widget), so the hidden widgets are tried again until none is left or none moves.
+  let left = items.filter((m) => m.ctx.box.hidden);
+  for (let moved = true; moved && left.length;) {
+    moved = false;
+    left = left.filter((gone) => {
+      const g = gone.ctx.at;
+      const inside = (a) => a.x >= g.x && a.x + a.w <= g.x + g.w;
+      const below = shown.filter((m) => inside(area.get(m)) && area.get(m).y === g.y + g.h);
+      const above = shown.filter((m) => inside(area.get(m)) && area.get(m).y + area.get(m).h === g.y);
+      for (const m of below.length ? below : above) {
+        const a = area.get(m);
+        if (below.length) a.y = g.y;
+        a.h += g.h;
+      }
+      if (below.length || above.length) { moved = true; return false; }
+      return true;
+    });
   }
   for (const m of items) { const a = area.get(m); m.ctx.box.style.gridArea = `${a.y + 1} / ${a.x + 1} / span ${a.h} / span ${a.w}`; }
 }

@@ -1505,6 +1505,13 @@ html.beat-4 .obs-pill.on .obs-led { box-shadow: 0 0 34px rgba(239, 68, 68, .9); 
 .dcf-app:disabled { opacity: .5; }
 .dcf-app.busy, .dcf-pickpc.busy, .dcf-stop.busy { opacity: .55; }
 .dcf-shint { padding: 2px 4px; font-size: 13px; color: var(--muted); }
+.dcf-warn { display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 100%; padding: 10px 14px; border-radius: 12px; background: rgba(240, 178, 50, .14); border: 1px solid rgba(240, 178, 50, .45); color: #f0b232; font-size: 14px; }
+.dcf-warnbtn { height: 40px; padding: 0 16px; border-radius: 10px; border: none; background: #f0b232; color: #1a1300; font: inherit; font-size: 14px; font-weight: 600; }
+.dcf-warnbtn.busy { opacity: .55; }
+/* recent notifications under the channels, as in the list layout */
+.dcf-notes { margin-top: auto; display: flex; flex-direction: column; gap: 6px; padding-top: 8px; }
+.dcf-ntf { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-left: 3px solid #5865f2; border-radius: 6px; background: rgba(255, 255, 255, .04); font-size: 13px; }
+.dcf-ntf span { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dcf-livebox { flex: none; display: flex; align-items: center; gap: 14px; padding: 16px 18px; border-radius: 16px; background: rgba(242, 63, 67, .12); border: 1px solid rgba(242, 63, 67, .4); }
 .dcf-lt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .dcf-lt b { font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

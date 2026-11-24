@@ -86,6 +86,28 @@ public sealed class DiscordTests : IDisposable
     }
 
     [Fact]
+    public async Task The_bar_allows_only_the_actions_it_shows()
+    {
+        var monitor = Monitor(control: true, type: "discord-bar");
+        foreach (var action in new[] { "mute", "deafen", "leave" }) Assert.True(DiscordMonitor.ControlAllowed(Config(), action), action);
+        foreach (var action in new[] { "join", "inputmode" }) Assert.False(DiscordMonitor.ControlAllowed(Config(), action), action);
+        Assert.Contains("turned off", await monitor.ActAsync("join", "c1"));
+        Assert.Contains("turned off", await monitor.ActAsync("inputmode", null));
+        // allowed, so the press gets as far as needing a connection
+        Assert.Equal("Discord is not connected", await monitor.ActAsync("mute", null));
+    }
+
+    [Fact]
+    public void The_Discord_widget_and_the_global_switch_still_allow_every_action()
+    {
+        Monitor(control: true);
+        Assert.True(DiscordMonitor.ControlAllowed(Config(), "join"));
+        Assert.True(DiscordMonitor.ControlAllowed(Config(), "inputmode"));
+        Monitor(control: false, type: "discord-bar", allowControl: true);
+        Assert.True(DiscordMonitor.ControlAllowed(Config(), "join"));
+    }
+
+    [Fact]
     public void The_bar_wants_the_chat_like_the_widget_but_not_the_notifications()
     {
         Monitor(control: false, type: "discord-bar", chat: true);

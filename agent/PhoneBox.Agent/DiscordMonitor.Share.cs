@@ -264,7 +264,10 @@ public sealed partial class DiscordMonitor
                 var start = new System.Diagnostics.ProcessStartInfo(update) { UseShellExecute = false, CreateNoWindow = true };
                 start.ArgumentList.Add("--processStart");
                 start.ArgumentList.Add("Discord.exe");
-                System.Diagnostics.Process.Start(start)?.Dispose();
+                // It hands over to the running Discord and exits at once; one that hangs is not left behind.
+                using var updater = System.Diagnostics.Process.Start(start);
+                if (updater is not null && !updater.WaitForExit(TimeSpan.FromSeconds(15)))
+                    try { updater.Kill(); } catch { } // exited meanwhile
             }
             catch (Exception ex) { log.LogInformation("discord: could not bring Discord forward ({Msg})", ex.Message); }
 #endif

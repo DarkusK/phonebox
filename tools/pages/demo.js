@@ -113,9 +113,14 @@
   const isObs = (type) => type === 'obs' || type.startsWith('obs-');
   // like AgentConfig.Widgets(enabledPagesOnly: true): what may control the computer comes from enabled pages only
   const shownWidgets = (c) => widgets({ ...c, pages: (c.pages || []).filter((p) => p.enabled !== false) });
-  const dcControl = (c) => shownWidgets(c).some((w) => (w.type === 'discord' || w.type === 'discord-bar') && w.options?.control === true); // DiscordMonitor.WidgetControl
-  const dcShare = (c) => c.discord?.screenShare === true && dcControl(c); // DiscordMonitor.ShareWanted
-  const dcChat = (c) => c.discord?.chat === true && shownWidgets(c).some((w) => w.type === 'discord' || w.type === 'discord-bar'); // DiscordMonitor.ChatWanted
+  // a saved config without a Discord section keeps the simulated connection; an explicit enabled: false turns it off
+  const dcOn = (c) => c.discord?.enabled !== false;
+  const dcWidget = (c, type) => shownWidgets(c).some((w) => w.type === type && w.options?.control === true);
+  const dcControl = (c) => dcWidget(c, 'discord') || dcWidget(c, 'discord-bar'); // DiscordMonitor.WidgetControl
+  // DiscordMonitor.ControlAllowed: the bar's own option allows only the actions it shows
+  const dcVoice = (c, a) => c.discord?.allowControl === true || dcWidget(c, 'discord') || ((a == null || ['mute', 'deafen', 'leave'].includes(a)) && dcWidget(c, 'discord-bar'));
+  const dcShare = (c) => dcOn(c) && c.discord?.screenShare === true && dcControl(c); // DiscordMonitor.ShareWanted
+  const dcChat = (c) => dcOn(c) && c.discord?.chat === true && shownWidgets(c).some((w) => w.type === 'discord' || w.type === 'discord-bar'); // DiscordMonitor.ChatWanted
   const feedsCanOpen = (c) => shownWidgets(c).some((w) => w.type === 'feeds' && w.options?.open === true);
 
   // What the agent sends to a phone (AgentConfig.ToPublic): no commands, keys, tokens or what a rule matches on.
@@ -646,7 +651,8 @@
       // who is in Lounge: only when a widget that shows channels wants it, as the agent does (DiscordFavorites.WantedRooms)
       const lounge = shownWidgets(c).some((w) => w.type === 'discord' && w.options?.channels !== false
         && ((w.options?.favChannels || []).includes('c3') || ((w.options?.favGuilds || []).includes('g1') && !(w.options?.favChannels || []).includes('c1'))));
-      return json({ enabled: true, share: dcShare(c), chat: dcChat(c), chatUnread: dcChat(c) && !dc.chatSeen, control: c.discord?.allowControl === true || dcControl(c), widgetControl: dcControl(c), snapshot: {
+      if (!dcOn(c)) return json({ enabled: false, share: false, chat: false, chatUnread: false, control: false, joinControl: false, widgetControl: false, snapshot: null });
+      return json({ enabled: true, share: dcShare(c), chat: dcChat(c), chatUnread: dcChat(c) && !dc.chatSeen, control: dcVoice(c), joinControl: dcVoice(c, 'join'), widgetControl: dcControl(c), snapshot: {
         connected: true, error: null, user: 'demo', muted: dc.muted, deafened: dc.deaf, channelId: dc.in, channelName: dc.in ? 'Game night' : null, channelKind: dc.in ? 'voice' : null,
         inputMode: dc.ptt ? 'PUSH_TO_TALK' : 'VOICE_ACTIVITY', pttKey: true,
         members: dc.in ? [{ id: '1', name: 'demo', muted: dc.muted, deafened: dc.deaf }, { id: '2', name: 'Ada', muted: false, deafened: false, speaking: Math.floor(now() / 1500) % 2 === 0 }, { id: '3', name: 'Linus', muted: true, deafened: false }] : [],
@@ -741,8 +747,8 @@
     }
     if (path.startsWith('/api/discord/') && method === 'POST') {
       const dcCfg = await config();
-      if (dcCfg.discord?.allowControl !== true && !dcControl(dcCfg)) return json({ error: "controlling Discord is turned off in the widget's settings and in Settings › General › Discord" }, 400);
       const a = path.slice(13);
+      if (!dcVoice(dcCfg, a)) return json({ error: "controlling Discord is turned off in the widget's settings and in Settings › General › Discord" }, 400);
       if (a === 'mute') dc.muted = !dc.muted; else if (a === 'deafen') dc.deaf = !dc.deaf; else if (a === 'inputmode') dc.ptt = !dc.ptt; else if (a === 'leave') dc.in = null; else if (a === 'join') dc.in = q.get('channel'); else return json({ error: 'unknown action' }, 400);
       return json({ ok: true });
     }

@@ -722,13 +722,13 @@ public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMo
     /// </summary>
     public async Task<string?> ActAsync(string action, string? channel)
     {
-        if (!ControlAllowed(config.Get()))
+        if (!ControlAllowed(config.Get(), action))
             return "controlling Discord is turned off in the widget's settings and in Settings › General › Discord";
         await _act.WaitAsync();
         try
         {
             // Checked again here: the widget's option or page may have been switched off while this press was queued.
-            if (!ControlAllowed(config.Get())) return "controlling Discord is turned off in the widget's settings and in Settings › General › Discord";
+            if (!ControlAllowed(config.Get(), action)) return "controlling Discord is turned off in the widget's settings and in Settings › General › Discord";
             var s = _snap;
             if (!s.Connected) return "Discord is not connected";
             switch (action)
@@ -759,12 +759,19 @@ public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMo
     /// Control needs a Discord widget with the control option on, on a page that is enabled, or the global
     /// <see cref="DiscordConfig.AllowControl"/> switch (off by default) for shortcuts and custom widgets.
     /// </summary>
-    public static bool ControlAllowed(AgentConfig cfg) =>
-        cfg.Discord.AllowControl || WidgetControl(cfg);
+    /// <param name="action">The action asked for; null asks whether any is allowed (the panel's buttons). The
+    /// current-channel bar's own option allows only the actions it shows: mute, deafen and leave.</param>
+    public static bool ControlAllowed(AgentConfig cfg, string? action = null) =>
+        cfg.Discord.AllowControl || Control(cfg, "discord") || (action is null || BarActions.Contains(action)) && Control(cfg, "discord-bar");
 
-    /// <summary>A Discord widget with the control option on, on a page that is enabled: the global switch does not count.</summary>
-    public static bool WidgetControl(AgentConfig cfg) =>
-        cfg.Widgets(enabledPagesOnly: true).Any(w => (w.Type == "discord" || w.Type == "discord-bar") && w.Bool("control") == true);
+    /// <summary>The voice actions the current-channel bar's control option allows.</summary>
+    internal static readonly string[] BarActions = ["mute", "deafen", "leave"];
+
+    /// <summary>A Discord widget or the current-channel bar with the control option on, on a page that is enabled: the global switch does not count.</summary>
+    public static bool WidgetControl(AgentConfig cfg) => Control(cfg, "discord") || Control(cfg, "discord-bar");
+
+    private static bool Control(AgentConfig cfg, string type) =>
+        cfg.Widgets(enabledPagesOnly: true).Any(w => w.Type == type && w.Bool("control") == true);
 
     // Discord answers a settings change with the new settings; take the state from that, not from the next poll.
     internal void ApplyVoice(JsonNode? vs)
