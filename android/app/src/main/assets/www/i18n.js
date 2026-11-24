@@ -297,7 +297,7 @@
       's.discord.screenShare': 'Start and stop Discord screen shares from the phone',
       's.discord.screenShareHint': 'Asks Discord for permission to start screen shares, so Discord asks you to approve PhoneBox once more. While the share view is open on the phone, PhoneBox lists the apps with a window on this computer (names only). Discord decides what it can share directly; for anything else use its picker on the computer. Also needs a Discord widget with Control on.',
       's.discord.shareGamesOnly': 'List only the games Discord can share directly',
-      's.discord.shareGamesOnlyHint': 'Discord starts a share by itself only for the games it detects; anything else goes through its picker on the computer. With this on, PhoneBox reads Discord's public list of those games from discord.com once a day (nothing about this computer is sent) and lists only the running apps on it.',
+      's.discord.shareGamesOnlyHint': 'Discord starts a share by itself only for the games it detects; anything else goes through its picker on the computer. With this on, PhoneBox reads the public list of those games from discord.com once a day (nothing about this computer is sent) and lists only the running apps on it.',
       's.discord.chat': 'Show Discord chat and new-message dots on the phone (read-only)',
       's.discord.chatHint': 'Sends the text of the channels you open in the widget to the phone. Asks Discord for permission to read messages, so Discord asks you to approve PhoneBox once more. The text stays in memory only (never in a file or the log) and is gone when Discord disconnects or this is turned off. If you decline, only the chat stays off.',
       'w.steam.turnOn': 'Connect Steam in Settings › General',

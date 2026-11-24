@@ -1529,23 +1529,6 @@ export function buildLayout() {
 
 /** A widget that hides itself (box.hidden) gives its cells away: the widgets right below it whose columns lie within
  *  its own grow up into its rows; with none below, the ones right above grow down. Shown again, all go back. */
-export function reflowPage(pi) {
-  const items = mounted.filter((m) => m.pi === pi);
-  const area = new Map(items.map((m) => [m, { ...m.ctx.at }]));
-  for (const gone of items.filter((m) => m.ctx.box.hidden)) {
-    const g = gone.ctx.at;
-    const inside = (a) => a.x >= g.x && a.x + a.w <= g.x + g.w;
-    const shown = items.filter((m) => m !== gone && !m.ctx.box.hidden);
-    const below = shown.filter((m) => inside(area.get(m)) && area.get(m).y === g.y + g.h);
-    const above = shown.filter((m) => inside(area.get(m)) && area.get(m).y + area.get(m).h === g.y);
-    for (const m of below.length ? below : above) {
-      const a = area.get(m);
-      if (below.length) a.y = g.y;
-      a.h += g.h;
-    }
-  }
-  for (const m of items) { const a = area.get(m); m.ctx.box.style.gridArea = `${a.y + 1} / ${a.x + 1} / span ${a.h} / span ${a.w}`; }
-}
 
 export function activeSet() { return new Set([curPage - 1, curPage, curPage + 1]); }
 export const pageOf = (kind) => mounted.filter((m) => m.pi === curPage && m.def.needs.includes(kind)).length > 0;
