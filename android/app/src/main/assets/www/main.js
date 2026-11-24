@@ -250,6 +250,11 @@ const ICONS = {
   err: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 8v4M12 16h.01',
   info: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 16v-4M12 8h.01',
   monitor: 'M2 3h20v14H2zM8 21h8M12 17v4',
+  'mic-off': 'M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 10v1a7 7 0 0 1-14 0v-1M12 18v4M8 22h8|M3 3l18 18',
+  'headphone-off': 'M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3|M3 3l18 18',
+  'log-out': 'M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4|M10 17l-5-5 5-5|M5 12h12',
+  'screen-share': 'M13 3H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-3|M8 21h8|M12 17v4|M17 8l5-5|M17 3h5v5',
+  'screen-share-off': 'M13 3H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-3|M8 21h8|M12 17v4|M22 3l-5 5|M17 3l5 5',
   pause: 'M6 4h4v16H6zM14 4h4v16h-4z',
   play: 'M6 3l14 9-14 9V3z',
   mic: 'M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 10v1a7 7 0 0 1-14 0v-1M12 18v4M8 22h8',
@@ -1447,7 +1452,7 @@ export function handleEvent(e) {
   else if (e.kind === 'reload') location.reload();
 }
 
-export const WIDGET_ICONS = { camera: '📹', dictate: '🎙️', spectrum: '📶', 'app-console': '🎛️', discord: '💬', steam: '👥', 'steam-activity': '🔔', rules: '⚡', chargecare: '🔋', nextup: '⏭️', moon: '🌙', wordclock: '🔤', clock: '🕒', weather: '⛅', forecast: '🌦️', media: '🎵', lyrics: '🎤', stat: '📈', gauge: '⏲️', chart: '📊', meters: '💾', gpu: '🎮', quotas: '✳️', sessions: '🤖',
+export const WIDGET_ICONS = { camera: '📹', dictate: '🎙️', spectrum: '📶', 'app-console': '🎛️', discord: '💬', 'discord-bar': '🔊', steam: '👥', 'steam-activity': '🔔', rules: '⚡', chargecare: '🔋', nextup: '⏭️', moon: '🌙', wordclock: '🔤', clock: '🕒', weather: '⛅', forecast: '🌦️', media: '🎵', lyrics: '🎤', stat: '📈', gauge: '⏲️', chart: '📊', meters: '💾', gpu: '🎮', quotas: '✳️', sessions: '🤖',
   github: '🐙', processes: '⚙️', shortcuts: '🎛️', button: '🔘', worldclock: '🌍', calendar: '📅', pomodoro: '🍅', countdown: '⏳', note: '📝', command: '💻',
   push: '📡', inbox: '📬', label: '🔤', analog: '🕰️', progress: '📆', stopwatch: '⏱️', timer: '⏲️', counter: '🔢', breathe: '🫁', quote: '💬',
   checklist: '✅', battery: '🔋', topprocs: '🔥', quotaring: '🎯', volume: '🔊', sun: '🌅', air: '🍃', hackernews: '📰', feeds: '🗞️', photos: '🖼️', exchange: '💱', crypto: '🪙', image: '🖼️', pcswitch: '🖥️', pagebuttons: '🧭', 'plex-queue': '🎛️', 'plex-playlists': '🎶' };
@@ -1504,7 +1509,7 @@ export function buildLayout() {
       const at = pl?.pos.get(w) || w;
       box.style.gridArea = `${at.y + 1} / ${at.x + 1} / span ${at.h} / span ${at.w}`;
       grid.appendChild(box);
-      const ctx = { page: p, w, o: w.options || {}, box, appearance };
+      const ctx = { page: p, w, o: w.options || {}, box, appearance, at, reflow: () => reflowPage(pi) };
       let inst;
       try { inst = def.create(box, ctx) || {}; } catch (e) { box.replaceChildren(h('div', 'empty', `${w.type}: ${e.message}`)); inst = {}; }
       PhoneBoxAppearance.widget(box, appearance);
@@ -1669,6 +1674,35 @@ export function buildDots() {
   dots.replaceChildren(...pages.map(dot), pageAllBtn, pagePauseBtn);
   dots.hidden = false;
   syncPagePauseUi();
+}
+
+/** A widget that hides itself (box.hidden, like the Discord bar outside a voice channel) gives its cells away: the
+ *  widgets right below it whose columns lie within its own grow up into its rows; with none below, the ones right above
+ *  grow down. Shown again, all go back to their own cells (every call starts again from each widget's own place). */
+export function reflowPage(pi) {
+  const items = mounted.filter((m) => m.pi === pi);
+  const area = new Map(items.map((m) => [m, { ...m.ctx.at }]));
+  const shown = items.filter((m) => !m.ctx.box.hidden);
+  // A neighbour that grows can reach the next hidden widget (two hidden bars stacked above a widget), so the hidden
+  // widgets are tried again until none is left or none moves.
+  let left = items.filter((m) => m.ctx.box.hidden);
+  for (let moved = true; moved && left.length;) {
+    moved = false;
+    left = left.filter((gone) => {
+      const g = gone.ctx.at;
+      const inside = (a) => a.x >= g.x && a.x + a.w <= g.x + g.w;
+      const below = shown.filter((m) => inside(area.get(m)) && area.get(m).y === g.y + g.h);
+      const above = shown.filter((m) => inside(area.get(m)) && area.get(m).y + area.get(m).h === g.y);
+      for (const m of below.length ? below : above) {
+        const a = area.get(m);
+        if (below.length) a.y = g.y;
+        a.h += g.h;
+      }
+      if (below.length || above.length) { moved = true; return false; }
+      return true;
+    });
+  }
+  for (const m of items) { const a = area.get(m); m.ctx.box.style.gridArea = `${a.y + 1} / ${a.x + 1} / span ${a.h} / span ${a.w}`; }
 }
 
 export function updateDots() {

@@ -50,6 +50,23 @@ key, release delay and sensitivity as they are. When push to talk is on but no k
 you; the widget then shows a warning, and one more tap switches back to voice activity. It uses the voice permission
 PhoneBox already asks for, so no new approval in Discord is needed.
 
+### The current-channel bar
+
+The **Discord current channel** widget (`discord-bar`) is the voice channel you are in as a bar for any page: the
+channel, who is there and mic / sound / leave. Wide it shows names and labelled buttons; narrower, round buttons and
+stacked avatars; with less room it drops sound, then chat, then screen. With screen share and the chat on, **Screen**
+and **Chat** open those views of a Discord widget on the first page that has one; while you share, **Screen** turns
+into **Stop sharing**.
+
+**Outside a voice channel it hides itself**, and the widgets right below it (or right above it) take its rows until
+you join again; turn **Hide outside a voice channel** off to keep it showing. After you leave, or while Discord
+reconnects, it waits three seconds before hiding, so the page doesn't jump for a blip. It doesn't hide in the settings'
+live preview, nor as a Smart Stack card (a stack has no rows to give away).
+
+Its own **Control** option (off by default) allows **mute, deafen and leave**, and stopping a screen share, nothing
+else: joining, the input mode, starting a share, the app list, the chat and **Open in Discord** stay with the Discord
+widget's own **Control**.
+
 ### Controlling Discord without the widget
 
 Shortcuts, scripts and custom widgets can use the same actions as the widget's buttons:
