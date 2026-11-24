@@ -151,6 +151,42 @@ const dcCall = (kind, s) => {
   return { on, ic, label };
 };
 
+// Screen share and chat (local tweak, agent from upstream 0.9.29): what the agent's share error codes mean
+const DC_SHARE_ERR = {
+  off: ['Screen share is off in Settings › Discord', 'Трансляция выключена в настройках › Discord'],
+  notAllowed: ['Approve PhoneBox in Discord for screen share', 'Одобрите PhoneBox в Discord для трансляции'],
+  unknown: ["Discord doesn't say whether you are sharing", 'Discord не сообщает, идёт ли трансляция'],
+  noCall: ['Join a voice channel first', 'Сначала войдите в голосовой канал'],
+  sharing: ['Already sharing', 'Трансляция уже идёт'],
+  gone: ['That window has closed', 'Это окно уже закрыто'],
+  notDirect: ['Discord shares only detected games directly: choose on the PC', 'Discord напрямую транслирует только распознанные игры — выберите на ПК'],
+  busy: ['Wait a moment', 'Подождите секунду'],
+};
+// start ("app" with a pid, "pick" for Discord's own picker on the PC) or stop a share; never sent twice by itself
+const dcShareAct = async (action, pid) => {
+  const ctl = new AbortController();
+  let timer;
+  const deadline = new Promise((_, fail) => { timer = setTimeout(() => { ctl.abort(); fail(new Error('timeout')); }, 12000); });
+  try {
+    await Promise.race([deadline, (async () => {
+      const r = await fetch(`${API}/discord/share/${action}` + (pid ? '?pid=' + pid : ''), { method: 'POST', cache: 'no-store', headers: PANEL_HEADERS, signal: ctl.signal });
+      if (r.ok) return;
+      const { code, error } = await r.json().catch(() => ({}));
+      const m = DC_SHARE_ERR[code];
+      toast(m ? dcL(m[0], m[1]) : error || t('w.discord.failed'), 'err');
+    })()]);
+  } catch (_) { toast(t('panel.pcNoAnswer'), 'err'); } finally { clearTimeout(timer); }
+};
+const dcLive = () => h('span', 'dcf-badge', '● ' + dcL('LIVE', 'В ЭФИРЕ'));
+// the bar asks the big Discord widget to open a tab: go to its page, and it picks this up on its next update
+let dcWant = null;
+const dcOpen = (tab) => {
+  const i = pages.findIndex((p) => (p.widgets || []).some((w) => w.type === 'discord'));
+  if (i < 0) { toast(dcL('Add the Discord widget to a page', 'Добавьте виджет Discord на страницу'), 'err'); return; }
+  dcWant = tab;
+  gotoPageRef(i + 1);
+};
+
 // Discord through the desktop app on the PC: the voice channel / call you are in, who is there, mute / deafen / leave,
 // voice channels to join and recent notifications. Buttons only work when the widget allows control.
 W.discord = {
@@ -184,6 +220,140 @@ W.discord = {
     // The "focus" layout (local tweak): the server, the channel you are in with who is there and big call buttons on
     // the left; the chosen server's voice channels (or, from the switcher, all servers) on the right.
     let sel = null, picking = false, seenChannel = null;
+    // The right side's tab: voice channels, the chat (read-only) or the screen share. The share state is asked for
+    // beside the main poll (the "LIVE" badge); the window list and the messages only while their tab is on screen.
+    let tab = 'chan', share = null, shareBusy = null, shareWaiting = 0, shareNext = 0;
+    let chat = null, chatPick = false, pickGuild = null, chatAsked = 0, chatWaiting = 0, chatNext = 0;
+    const loadShare = async (apps) => {
+      shareWaiting++;
+      try { share = await api('/discord/share' + (apps ? '?apps=true' : ''), undefined, 8000); } catch (_) {} finally { shareWaiting--; }
+    };
+    const loadChat = async () => {
+      const n = ++chatAsked; // only the newest answer counts: an older one may be for another server or channel
+      const forGuild = chatPick ? pickGuild : null;
+      chatWaiting++;
+      try {
+        const c = await api('/discord/chat' + (chatPick ? '?picker=true' + (pickGuild ? '&guild=' + encodeURIComponent(pickGuild) : '') : ''), undefined, 8000);
+        if (n === chatAsked) chat = { ...c, forGuild };
+      } catch (_) {} finally { chatWaiting--; }
+    };
+    const openTab = (to) => {
+      tab = to; picking = false; chatPick = false; pickGuild = null;
+      if (to === 'chat') { chat = null; loadChat().then(() => render(true)); }
+      if (to === 'share') loadShare(true).then(() => render(true));
+      render(true);
+    };
+    const setTab = (to) => { haptic(); openTab(tab === to ? 'chan' : to); };
+    const shareAct = async (action, pid) => {
+      if (shareBusy) return;
+      haptic();
+      shareBusy = action + (pid || ''); render(true);
+      await dcShareAct(action, pid);
+      shareBusy = null;
+      await loadShare(tab === 'share');
+      render(true);
+    };
+    const chooseChat = async (channel) => {
+      haptic();
+      chatPick = false; pickGuild = null;
+      try { await api('/discord/chat/choose?channel=' + encodeURIComponent(channel), 'POST', 5000); } catch (_) { toast(t('w.discord.failed'), 'err'); }
+      if (tab === 'chat') await loadChat();
+      render(true);
+    };
+    const when = (ms) => {
+      if (!ms) return '';
+      const d = new Date(ms), now = new Date();
+      const time = d.toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' });
+      return d.toDateString() === now.toDateString() ? time : d.toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' }) + ' ' + time;
+    };
+    const note = (text) => h('div', 'dcf-note', text);
+    const chatPanel = () => {
+      const c = chat;
+      if (!c) return [note(t('w.loading'))];
+      if (!c.enabled) return [note(dcL('Chat is off: turn it on in Settings › Discord', 'Чат выключен: включите его в настройках › Discord'))];
+      if (!c.ready) return [note(c.error || dcL('Approve PhoneBox in Discord to read messages', 'Одобрите PhoneBox в Discord, чтобы читать сообщения'))];
+      const head = h('button', 'dcf-pick' + (chatPick ? ' open' : ''), icon(c.voice ? 'volume-2' : 'hash'),
+        h('span', null, c.channel ? (c.voice ? dcL('Chat · ', 'Чат · ') : '') + (c.channel.name || '') : dcL('Choose a channel', 'Выберите канал')), icon('chevron-down'));
+      head.addEventListener('click', () => { haptic(); chatPick = !chatPick; pickGuild = null; loadChat().then(() => render(true)); render(true); });
+      const bar = h('div', 'dcf-chatbar', head, h('span', 'dcf-ro', dcL('read-only', 'только чтение')));
+      if (data?.widgetControl && c.channel) {
+        const open = h('button', 'dcf-open', icon('external-link'), h('span', null, dcL('Open in Discord', 'Открыть в Discord')));
+        open.addEventListener('click', async () => { haptic(); try { await api('/discord/chat/open', 'POST', 5000); } catch (_) { toast(t('w.discord.failed'), 'err'); } });
+        bar.append(open);
+      }
+      if (chatPick) {
+        const rows = [];
+        const dot = (on) => (on ? h('span', 'dcf-dot') : null);
+        if (!pickGuild) {
+          const v = h('button', 'dcf-prow' + (c.voice ? ' cur' : ''), icon('volume-2'), h('span', null, dcL('Voice channel chat', 'Чат голосового канала') + (c.callName ? ': ' + c.callName : '')));
+          v.addEventListener('click', () => chooseChat('voice'));
+          rows.push(v);
+          for (const g of c.servers || []) {
+            const b = h('button', 'dcf-prow', dcIco(g.icon && dcImg('guild', g.id, g.icon), g.name, 'dcf-av'), h('span', null, g.name), dot(g.unread), icon('chevron-right'));
+            b.addEventListener('click', () => { haptic(); pickGuild = g.id; loadChat().then(() => render(true)); render(true); });
+            rows.push(b);
+          }
+        } else {
+          const back = h('button', 'dcf-prow back', icon('arrow-left'), h('span', null, (c.servers || []).find((g) => g.id === pickGuild)?.name || ''));
+          back.addEventListener('click', () => { haptic(); pickGuild = null; render(true); });
+          rows.push(back);
+          // until the answer for this server is in, another server's channels must not show under its name
+          const channels = c.forGuild === pickGuild ? c.channels : null;
+          if (!channels) rows.push(note(t('w.loading')));
+          for (const ch of channels || []) {
+            const b = h('button', 'dcf-prow' + (!c.voice && c.channel?.id === ch.id ? ' cur' : ''), icon('hash'), h('span', null, ch.name), dot(ch.unread));
+            b.addEventListener('click', () => chooseChat(ch.id));
+            rows.push(b);
+          }
+        }
+        return [bar, h('div', 'dcf-plist', ...rows)];
+      }
+      if (!c.channel) return [bar, note(dcL('Choose a channel above', 'Выберите канал сверху'))];
+      if (c.picker) return [bar, note(t('w.loading'))]; // the picker just closed: its answer holds no messages
+      const msgs = c.messages || [];
+      const list = h('div', 'dcf-msgs', ...msgs.map((m, i) => {
+        const same = i > 0 && msgs[i - 1].authorId === m.authorId && m.ts - msgs[i - 1].ts < 5 * 60000;
+        const who = h('div', 'dcf-who', h('b', null, m.author + (m.bot ? ' 🤖' : '')), h('small', null, when(m.ts)));
+        if (m.color) who.firstChild.style.color = m.color;
+        const extra = [m.attachments ? '📎 ' + m.attachments : '', !m.text && m.embed ? '🔗 ' + m.embed : ''].filter(Boolean).join(' · ');
+        return h('div', 'dcf-msg' + (same ? ' cont' : ''), same ? h('span', 'dcf-mgap') : dcIco(m.avatar && m.authorId && dcImg('user', m.authorId, m.avatar), m.author, 'dcf-mav'),
+          h('div', 'dcf-mb', same ? null : who, m.text ? h('div', 'dcf-mt', m.text) : null, extra ? h('div', 'dcf-mx', extra) : null));
+      }));
+      if (!msgs.length) list.append(note(dcL('No messages yet', 'Сообщений пока нет')));
+      requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; });
+      return [bar, list];
+    };
+    const sharePanel = (s) => {
+      const c = share;
+      if (!c) return [note(t('w.loading'))];
+      if (!c.enabled) return [note(dcL('Screen share is off: turn it on in Settings › Discord', 'Трансляция выключена: включите её в настройках › Discord'))];
+      if (!c.ready) return [note(c.refused ? dcL('Discord refused screen share. Approve PhoneBox again after restarting the agent.', 'Discord отказал в трансляции. Одобрите PhoneBox снова после перезапуска агента.')
+        : c.error || dcL('Approve PhoneBox in Discord for screen share', 'Одобрите PhoneBox в Discord для трансляции'))];
+      if (c.active === null) return [note(dcL(...DC_SHARE_ERR.unknown))];
+      const out = [];
+      if (c.active) {
+        const stop = h('button', 'dcf-stop' + (shareBusy === 'stop' ? ' busy' : ''), icon('screen-share-off'), dcL('Stop', 'Остановить'));
+        if (!shareBusy) stop.addEventListener('click', () => shareAct('stop')); else stop.disabled = true;
+        out.push(h('div', 'dcf-livebox', dcLive(), h('div', 'dcf-lt', h('b', null, c.name || dcL('Screen', 'Экран')),
+          h('small', null, dcL('to ', 'в канал «') + (s.channelName || '') + dcL('', '»'))), stop));
+        return out;
+      }
+      if (!c.inCall) out.push(note(dcL(...DC_SHARE_ERR.noCall)));
+      const pick = h('button', 'dcf-pickpc' + (shareBusy === 'pick' ? ' busy' : ''), icon('monitor'), dcL('Choose on the PC', 'Выбрать на ПК'));
+      if (c.inCall && !shareBusy) pick.addEventListener('click', () => shareAct('pick')); else pick.disabled = true;
+      out.push(pick);
+      if (c.apps?.length) {
+        out.push(h('div', 'dcf-cap', dcL('Or a window right away', 'Или сразу окно')));
+        out.push(h('div', 'dcf-grid', ...c.apps.map((a) => {
+          const b = h('button', 'dcf-app' + (shareBusy === 'app' + a.pid ? ' busy' : ''), h('span', 'dcf-appi', (a.name || '?').trim().charAt(0).toUpperCase()), h('span', null, a.name));
+          if (c.inCall && !shareBusy) b.addEventListener('click', () => shareAct('app', a.pid)); else b.disabled = true;
+          return b;
+        })));
+      }
+      out.push(h('div', 'dcf-fine', dcL('Discord shares only detected games directly; anything else through its picker on the PC.',
+        'Discord сам транслирует только распознанные игры. Остальное — через окно выбора на ПК.')));
+      return out;
+    };
     const renderFocus = (s, ctl) => {
       const servers = new Map();
       for (const c of s.channels) { const g = dcGid(c); if (!servers.has(g)) servers.set(g, []); servers.get(g).push(c); }
@@ -197,21 +367,23 @@ W.discord = {
       const gico = (gid) => { const c = servers.get(gid)?.[0]; return dcIco(c?.guildIcon && c?.guildId && dcImg('guild', c.guildId, c.guildIcon), sname(gid), 'dcf-sico'); };
       const pick = (gid) => { haptic(); sel = gid; picking = false; dcRecent(gid); render(true); };
       const switcher = h('button', 'dcf-switch' + (picking ? ' open' : ''), sel ? gico(sel) : null, h('span', 'dcf-sname', sel ? sname(sel) : dcL('Servers', 'Серверы')), icon('chevron-down'));
-      switcher.addEventListener('click', () => { haptic(); picking = !picking; render(true); });
+      switcher.addEventListener('click', () => { haptic(); picking = !picking; tab = 'chan'; render(true); });
       const recents = dcRecent().filter((g) => g !== sel && servers.has(g)).slice(0, 3).map((g) => {
         const b = labelled(h('button', 'dcf-recent', gico(g)), sname(g));
         b.addEventListener('click', () => pick(g));
         return b;
       });
       let mid;
+      const live = !!(s.channelId && share?.active);
       if (s.channelId) {
-        mid = h('div', 'dcf-now', h('span', 'dcf-label', dcL('Voice channel', 'Голосовой канал')), h('div', 'dcf-name', s.channelName || ''),
+        mid = h('div', 'dcf-now', h('span', 'dcf-label', dcL('Voice channel', 'Голосовой канал'), live ? dcLive() : null), h('div', 'dcf-name', s.channelName || ''),
           h('div', 'dcf-chips', ...s.members.map((m) => {
             const chip = h('span', 'dcf-chip' + (m.speaking ? ' speaking' : '') + (m.deafened ? ' deaf' : m.muted ? ' muted' : ''),
               dcIco(m.avatar && dcImg('user', m.id, m.avatar), m.name, 'dcf-av'), h('span', null, m.name));
             rings.set(m.id, chip);
             return chip;
-          })));
+          })),
+          live ? h('div', 'dcf-hint', dcL('Sharing: ', 'Транслируете: '), h('b', null, share.name || dcL('screen', 'экран'))) : null);
       } else {
         const last = store.get('dc-last', null);
         const back = last && s.channels.some((c) => c.id === last.id)
@@ -226,9 +398,31 @@ W.discord = {
         if (ctl && !busy && (kind !== 'leave' || s.channelId)) b.addEventListener('click', () => act(kind)); else b.disabled = true;
         return b;
       };
-      const left = h('div', 'dcf-left', h('div', 'dcf-top', switcher, ...recents), mid, h('div', 'dcf-calls', call('mute'), call('deafen'), call('leave')));
+      // Screen and Chat open their tab on the right (a second tap goes back to the channels)
+      const tabCall = (kind) => {
+        const on = kind === 'share' && live;
+        const label = kind === 'share' ? (on ? dcL('Live', 'В эфире') : dcL('Screen', 'Экран')) : dcL('Chat', 'Чат');
+        const b = h('button', `dcf-call ${kind}` + (tab === kind ? ' sel' : '') + (on ? ' live' : ''),
+          h('span', 'dcf-disc', icon(kind === 'share' ? 'screen-share' : 'message-square')), h('span', 'dcf-cl', label),
+          kind === 'chat' && data.chatUnread && tab !== 'chat' ? h('span', 'dcf-dot') : null);
+        b.addEventListener('click', () => setTab(kind));
+        return b;
+      };
+      const hasShare = !!data.share, hasChat = !!data.chat;
+      if ((tab === 'share' && !hasShare) || (tab === 'chat' && !hasChat)) tab = 'chan';
+      const calls = [call('mute'), call('deafen'), hasShare ? tabCall('share') : null, hasChat ? tabCall('chat') : null, call('leave')].filter(Boolean);
+      const left = h('div', 'dcf-left', h('div', 'dcf-top', switcher, ...recents), mid, h('div', 'dcf-calls' + (calls.length > 3 ? ' many' : ''), ...calls));
+      const tabs = hasShare || hasChat ? h('div', 'dcf-tabs', ...[['chan', dcL('Channels', 'Каналы')], hasChat && ['chat', dcL('Chat', 'Чат')], hasShare && ['share', dcL('Screen share', 'Трансляция')]]
+        .filter(Boolean).map(([k, label]) => {
+          const b = h('button', 'dcf-tab' + (tab === k ? ' on' : ''), label,
+            (k === 'chat' && data.chatUnread && tab !== 'chat') || (k === 'share' && live) ? h('span', 'dcf-dot') : null);
+          b.addEventListener('click', () => { haptic(); openTab(k); });
+          return b;
+        })) : null;
       let right;
-      if (picking) {
+      if (tab === 'chat') right = h('div', 'dcf-right chat', tabs, ...chatPanel());
+      else if (tab === 'share') right = h('div', 'dcf-right', tabs, ...sharePanel(s));
+      else if (picking) {
         right = h('div', 'dcf-right', h('div', 'dcf-cap', dcL('Servers', 'Серверы')), h('div', 'dcf-grid', ...[...servers.keys()].map((g) => {
           const b = h('button', 'dcf-srv' + (g === sel ? ' cur' : ''), gico(g), h('span', null, sname(g)));
           b.addEventListener('click', () => pick(g));
@@ -242,13 +436,15 @@ W.discord = {
           return b;
         })));
       }
+      if (tabs && tab === 'chan') right.prepend(tabs);
       box.replaceChildren(left, right);
     };
     if (o.layout === 'focus') box.classList.add('dcf');
     const render = (force = false) => {
       const s0 = data?.snapshot;
       const quiet = s0?.members ? { ...data, snapshot: { ...s0, members: s0.members.map(({ speaking, ...m }) => m) } } : data;
-      const key = JSON.stringify([quiet, busy, [...open], box.clientHeight, box.clientWidth, sel, picking]);
+      const key = JSON.stringify([quiet, busy, [...open], box.clientHeight, box.clientWidth, sel, picking,
+        tab, share, shareBusy, tab === 'chat' ? chat : null, chatPick, pickGuild]);
       if (!force && key === lastKey) { ring(); return; }
       lastKey = key;
       rings.clear();
@@ -327,8 +523,23 @@ W.discord = {
       // the pace follows the answer just received, so joining or leaving a channel changes it at once
       load().then(() => { asking = false; next = Date.now() + (data?.snapshot?.channelId ? 500 : 2000); render(); });
     };
+    // the share state every 4 s while in a call (the LIVE badge), every 2 s with the window list while its tab is open
+    const pollShare = () => {
+      if (o.layout !== 'focus' || !data?.share || shareWaiting || shareBusy || !visible() || Date.now() < shareNext) return;
+      if (tab !== 'share' && !data.snapshot?.channelId) { if (share?.active) { share = null; render(); } return; }
+      shareNext = Date.now() + (tab === 'share' ? 2000 : 4000);
+      loadShare(tab === 'share').then(() => render());
+    };
+    // the open chat every 2 s, only while its tab is on screen
+    const pollChat = () => {
+      if (tab !== 'chat' || chatWaiting || !visible() || Date.now() < chatNext) return;
+      chatNext = Date.now() + 2000;
+      loadChat().then(() => render());
+    };
+    // the bar's Chat button: open that tab once this page is on screen
+    const wanted = () => { if (dcWant && o.layout === 'focus' && visible() && data) { const to = dcWant; dcWant = null; openTab(to); } };
     // 'fast' (every 250 ms) drives the asking; 'tick' (every second) also redraws when the widget's size changes
-    return { update: (kind) => { poll(); if (kind !== 'fast') render(); } };
+    return { update: (kind) => { poll(); pollShare(); pollChat(); wanted(); if (kind !== 'fast') render(); } };
   },
 };
 
@@ -365,7 +576,8 @@ W['discord-bar'] = {
       }
       hide(false);
       const quiet = { ...s, members: s.members.map(({ speaking, ...m }) => m), notifications: null };
-      const key = JSON.stringify([quiet, data.control, busy]);
+      const live = !!share?.active;
+      const key = JSON.stringify([quiet, data.control, busy, live, share?.name, data.chat, data.chatUnread, shareBusy]);
       if (!force && key === lastKey) { for (const m of s.members) rings.get(m.id)?.classList.toggle('speaking', !!m.speaking); return; }
       lastKey = key;
       rings.clear();
@@ -382,12 +594,32 @@ W['discord-bar'] = {
         if (ctl && !busy) b.addEventListener('click', () => act(kind)); else b.disabled = true;
         return b;
       };
-      box.replaceChildren(h('div', 'dcb',
+      // while sharing: a red button that stops it (a share starts only from the big widget, where the window is picked)
+      let stop = null;
+      if (live) {
+        const label = dcL('Stop sharing', 'Остановить трансляцию');
+        stop = labelled(h('button', 'dcb-btn share' + (shareBusy ? ' busy' : ''), icon('screen-share-off'), h('span', 'dcb-l', dcL('Stop', 'Стоп'))), label);
+        if (!shareBusy) stop.addEventListener('click', async () => { haptic(); shareBusy = true; render(true); await dcShareAct('stop'); shareBusy = false; await loadShare(); render(true); });
+        else stop.disabled = true;
+      }
+      let chatB = null;
+      if (data.chat) {
+        chatB = labelled(h('button', 'dcb-btn chat', icon('message-square'), h('span', 'dcb-l', dcL('Chat', 'Чат')), data.chatUnread ? h('span', 'dcb-dot') : null), dcL('Chat', 'Чат'));
+        chatB.addEventListener('click', () => { haptic(); dcOpen('chat'); });
+      }
+      const btns = [btn('mute'), btn('deafen'), stop, chatB, btn('leave')].filter(Boolean);
+      box.replaceChildren(h('div', 'dcb' + (live ? ' live' : ''),
         h('div', 'dcb-info',
-          h('div', 'dcb-head', icon('volume-2', 'dcb-vi'), h('b', 'dcb-name', s.channelName || ''), here?.guild ? h('span', 'dcb-guild', here.guild) : null),
+          h('div', 'dcb-head', icon('volume-2', 'dcb-vi'), h('b', 'dcb-name', s.channelName || ''), live ? dcLive() : null, here?.guild ? h('span', 'dcb-guild', here.guild) : null),
+          live && share.name ? h('div', 'dcb-sub', dcL('Sharing: ', 'Транслируете: ') + share.name) : null,
           h('div', 'dcb-chips', ...chips),
           h('div', 'dcb-stack', ...stack, s.members.length > 5 ? h('span', 'dcb-av dcb-more', '+' + (s.members.length - 5)) : null)),
-        h('div', 'dcb-btns', btn('mute'), btn('deafen'), btn('leave'))));
+        h('div', 'dcb-btns n' + btns.length, ...btns)));
+    };
+    let share = null, shareBusy = false, shareWaiting = false, shareNext = 0;
+    const loadShare = async () => {
+      shareWaiting = true;
+      try { share = await api('/discord/share', undefined, 8000); } catch (_) {} finally { shareWaiting = false; }
     };
     const visible = () => box.isConnected && !document.hidden && pages[curPage] === page && !box.closest('.stack-item:not(.active)');
     let next = 0, asking = false, shown = false;
@@ -399,7 +631,14 @@ W['discord-bar'] = {
       asking = true;
       load().then(() => { asking = false; next = Date.now() + (data?.snapshot?.channelId ? 500 : 2000); render(); });
     };
-    return { update: (kind) => { poll(); if (kind !== 'fast') render(); } };
+    // the share state every 4 s while in a call, for the LIVE badge and the stop button
+    const pollShare = () => {
+      if (!data?.share || !data.snapshot?.channelId) { share = null; return; }
+      if (shareWaiting || shareBusy || !visible() || Date.now() < shareNext) return;
+      shareNext = Date.now() + 4000;
+      loadShare().then(() => render());
+    };
+    return { update: (kind) => { poll(); pollShare(); if (kind !== 'fast') render(); } };
   },
 };
 

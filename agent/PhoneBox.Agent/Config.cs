@@ -406,6 +406,12 @@ public sealed class DiscordConfig
     public bool Enabled { get; set; }
     public string? ClientId { get; set; }
     public string? ClientSecret { get; set; }
+    /// <summary>Allow /api/discord/{action} without a Discord widget (off by default).</summary>
+    public bool AllowControl { get; set; }
+    /// <summary>Screen share from the phone (off by default); asks Discord for rpc.screenshare.read / .write.</summary>
+    public bool ScreenShare { get; set; }
+    /// <summary>Read-only chat and new-message dots (off by default); asks Discord for messages.read.</summary>
+    public bool Chat { get; set; }
 }
 
 public sealed class SteamConfig
