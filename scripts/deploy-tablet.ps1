@@ -33,16 +33,18 @@ if (-not $SkipAgent) {
     if (-not $copied) { throw 'could not replace PhoneBoxAgent.exe; the previous agent was restarted' }
     'agent installed'
 }
+# The agent works with adb as it starts, which can leave the adb server stuck (the panel then says the PC is not
+# answering): after any install, start adb fresh. Not Start-Process -Wait: that waits for the adb daemon it starts
+# too, which keeps running, so it never returns.
+Get-Process adb -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-Sleep 1
+$srv = Start-Job { adb start-server 2>&1 }
+Wait-Job $srv -Timeout 20 | Out-Null
+Start-Sleep 6
+'adb restarted'
 if (-not $SkipApk) {
     $apk = "$src\android\app\build\outputs\apk\release\app-release.apk"
-    # the agent works with adb as it starts, which can leave the adb server stuck: start it fresh, then give the
-    # install a time limit
-    Get-Process adb -ErrorAction SilentlyContinue | Stop-Process -Force
-    Start-Sleep 1
-    # not Start-Process -Wait: that waits for the adb daemon it starts too, which keeps running, so it never returns
-    $srv = Start-Job { adb start-server 2>&1 }
-    Wait-Job $srv -Timeout 20 | Out-Null
-    Start-Sleep 6
+    # the install gets a time limit
     $job = Start-Job { adb install -r $using:apk 2>&1 }
     if (Wait-Job $job -Timeout 120) { Receive-Job $job } else { Stop-Job $job; throw 'adb install timed out (try: adb kill-server)' }
     adb shell monkey -p net.oxog.phonebox.deskpanel -c android.intent.category.LAUNCHER 1 | Out-Null
