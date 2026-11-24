@@ -1044,7 +1044,7 @@ window.PhoneBoxLocaleData = Object.assign(window.PhoneBoxLocaleData || {}, {
       "Discord current channel": "Discord 현재 채널",
       "The voice channel you are in, who is there and mute / deafen / leave (with screen share and chat when they are on) as a bar that fits any size. Outside a voice channel it hides and the widgets next to it take its place.": "참여 중인 음성 채널, 그곳에 있는 사람, 마이크 끄기 / 소리 끄기 / 나가기 버튼(켜져 있으면 화면 공유와 채팅 포함)을 어떤 크기에도 맞는 막대로 표시합니다. 음성 채널 밖에서는 숨겨지고 옆의 위젯이 그 자리를 차지합니다.",
       "Hide outside a voice channel (the widgets next to it take its place)": "음성 채널 밖에서는 숨기기(옆의 위젯이 그 자리를 차지합니다)",
-      "Allow mute, deafen and leave from the phone": "휴대폰에서 마이크 끄기, 소리 끄기, 나가기 허용",
+      "Allow mute, deafen, leave and stopping a screen share from the phone": "휴대폰에서 마이크 끄기, 소리 끄기, 나가기, 화면 공유 중지 허용",
       "Allow recording, streaming and scene switching from the phone": "휴대폰에서 녹화, 스트리밍 및 장면 전환 허용",
       "Allow start / stop / restart from the phone": "휴대 전화에서 시작 / 중지 / 재시작을 허용",
       "Allow switching from the phone": "휴대폰에서 전환 허용",

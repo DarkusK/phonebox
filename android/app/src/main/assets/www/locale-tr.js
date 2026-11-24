@@ -457,7 +457,7 @@ window.PhoneBoxLocaleData = Object.assign(window.PhoneBoxLocaleData || {}, {
       "Discord current channel": "Discord'daki geçerli kanal",
       "The voice channel you are in, who is there and mute / deafen / leave (with screen share and chat when they are on) as a bar that fits any size. Outside a voice channel it hides and the widgets next to it take its place.": "Bulunduğun ses kanalı, orada kimlerin olduğu ve sessize alma / sağırlaştırma / ayrılma (açıksa ekran paylaşımı ve sohbetle birlikte), her boyuta uyan bir şerit olarak. Ses kanalı dışındayken gizlenir ve yanındaki widget'lar yerini alır.",
       "Hide outside a voice channel (the widgets next to it take its place)": "Ses kanalı dışındayken gizle (yanındaki widget'lar yerini alır)",
-      "Allow mute, deafen and leave from the phone": "Telefondan sessize alma, sağırlaştırma ve ayrılmaya izin ver",
+      "Allow mute, deafen, leave and stopping a screen share from the phone": "Telefondan sessize alma, sağırlaştırma, ayrılma ve ekran paylaşımını durdurmaya izin ver",
       "Allow recording, streaming and scene switching from the phone": "Telefondan kayıt, akış ve sahne değiştirme izin ver",
       "Allow start / stop / restart from the phone": "Telefondan başlatma / durdurma / yeniden başlatmaya izin ver",
       "Allow switching from the phone": "Telefondan geçiş yapmaya izin ver",

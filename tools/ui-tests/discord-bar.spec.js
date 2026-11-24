@@ -137,3 +137,35 @@ test("the bar's own Control does not start shares or join channels", async ({ pa
   });
   expect(out).toEqual({ join: 400, pick: 400, mute: 200 });
 });
+
+test('at the smallest size Mic and Leave fit inside the bar', async ({ page }) => {
+  await page.setViewportSize({ width: 780, height: 360 });
+  await show(page, [bar('b', 0, 0, 2, 1), note('rest', 2, 0, 10, 6)]);
+  const b = page.locator('.w-discord-bar');
+  await expect(b.locator('.dcb-btn.mute')).toBeVisible();
+  const box = await b.boundingBox();
+  for (const kind of ['mute', 'leave']) {
+    const r = await b.locator(`.dcb-btn.${kind}`).boundingBox();
+    expect(r.y).toBeGreaterThanOrEqual(box.y - 0.5);
+    expect(r.y + r.height).toBeLessThanOrEqual(box.y + box.height + 0.5);
+    expect(r.x + r.width).toBeLessThanOrEqual(box.x + box.width + 0.5);
+  }
+});
+
+test('rebuilt outside a channel, the bar stays hidden: the widgets around it do not jump', async ({ page }) => {
+  await show(page, [bar('b', 0, 0, 12, 1), note('below', 0, 1, 12, 5)]);
+  const b = page.locator('.w-discord-bar');
+  await expect(b.locator('.dcb-name')).toHaveText('Game night');
+  await b.locator('.dcb-btn.leave').click();
+  await expect(b).toBeHidden({ timeout: 6000 });
+  // a rebuild of the page (here a rotation and back) creates the bar again
+  await page.setViewportSize({ width: 360, height: 780 });
+  await page.setViewportSize({ width: 780, height: 360 });
+  const seen = await page.evaluate(() => new Promise((done) => {
+    let shown = false; const until = Date.now() + 1500;
+    const look = () => { const el = document.querySelector('.w-discord-bar'); if (el && !el.hidden) shown = true; if (Date.now() < until) requestAnimationFrame(look); else done(shown); };
+    look();
+  }));
+  expect(seen).toBe(false);
+  expect(await area(page, 'below')).toBe('1 / 1 / span 6 / span 12');
+});

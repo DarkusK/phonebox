@@ -71,9 +71,10 @@ widget's own **Control**.
 
 Shortcuts, scripts and custom widgets can use the same actions as the widget's buttons:
 `POST /api/discord/mute`, `/deafen`, `/inputmode`, `/leave` and `/join?channel=<id>` (an id from `GET /api/discord`). By
-default they work only while a Discord widget with **Control** on is on an enabled page. To use them without one, turn on
-**Let shortcuts and custom widgets control Discord** in **Settings › General › Discord** (`discord.allowControl`, off
-by default).
+default they work only while a Discord widget with **Control** on is on an enabled page. A current-channel bar with its
+own **Control** on allows `mute`, `deafen` and `leave` only (not `inputmode` or `join`). To use them all without a
+widget, turn on **Let shortcuts and custom widgets control Discord** in **Settings › General › Discord**
+(`discord.allowControl`, off by default).
 
 Who can reach these actions:
 
@@ -103,9 +104,10 @@ widget's two favourite lists (`favGuilds`, `favChannels`).
 
 ## Screen share
 
-**Settings › General › Discord › Start and stop Discord screen shares from the phone** (off by default; it also
-needs the **Control** option of a Discord widget on an enabled page, `discord.allowControl` is not enough) adds a 🖥️ button
-to the widget. While you are in a voice channel:
+**Settings › General › Discord › Start and stop Discord screen shares from the phone** (off by default) adds a 🖥️
+button to the widget. Starting a share and the list of apps need the **Control** option of a Discord widget on an
+enabled page (`discord.allowControl` is not enough). Stopping a share is also allowed by a current-channel bar with its
+own **Control** on, which learns only *whether* you share, never the apps or the name. While you are in a voice channel:
 
 - **Choose on PC** asks Discord to share: it shows its own picker on the computer (screens and windows), or goes live
   with the game it detects.
@@ -114,7 +116,8 @@ to the widget. While you are in a voice channel:
   what it can (the games it detects); PhoneBox doesn't look games up anywhere, it watches whether the share starts and
   otherwise tells you to use **Choose on PC**. Windows only; on Linux and macOS the list is empty.
 - **Stop sharing** ends the share. Discord uses one command to start and stop, so PhoneBox sends it only after Discord
-  has reported whether you are sharing (it does so right after PhoneBox connects).
+  has reported whether you are sharing (it does so right after PhoneBox connects), and waits a moment before sending
+  it: a share just ended on the computer is reported a little later, and the command would then start one.
 - Turning it on asks Discord for `rpc.screenshare.read` and `rpc.screenshare.write`, so **Discord asks you to approve
   PhoneBox again** (the widget waits for your answer; an approval that isn't answered times out after two minutes). If you decline,
   PhoneBox goes on with the permissions it had, or asks for the base ones when it had none, and only screen share stays

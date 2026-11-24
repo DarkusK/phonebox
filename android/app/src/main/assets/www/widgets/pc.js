@@ -217,7 +217,9 @@ W['discord-bar'] = {
       await new Promise((done) => setTimeout(done, 600));
       await load(); busy = null; render(true);
     };
-    const hide = (v) => { if (box.hidden !== v) { box.hidden = v; reflow?.(); } };
+    // after a rebuild (a rotation, a settings save) a late answer must not reflow the old page
+    let destroyed = false;
+    const hide = (v) => { if (!destroyed && box.hidden !== v) { box.hidden = v; reflow?.(); } };
     // It hides only on a page grid that can give its rows away (a Smart Stack card has no reflow), never in the
     // settings' live preview, and only once the agent has answered, so it doesn't blink away while the page loads.
     const canHide = o.autoHide !== false && !!reflow && !PREVIEW;
@@ -225,10 +227,14 @@ W['discord-bar'] = {
     // widgets around it don't jump for a blip.
     const GRACE = 3000;
     let shownIn = false, awaySince = 0;
+    // Start hidden where it may hide, so the widgets around it don't jump when the first answer says you are not in a
+    // channel; the page gives its rows away once every widget is in place.
+    if (canHide) { box.hidden = true; queueMicrotask(() => { if (!destroyed) reflow(); }); }
     const render = (force = false) => {
       const s = data?.snapshot;
       if (!s?.channelId || !data.enabled || !s.connected) {
-        if (canHide && data) {
+        if (canHide) {
+          if (!data) return; // still hidden until the agent answers
           if (!shownIn) { lastKey = ''; hide(true); return; }
           awaySince ||= Date.now();
           if (Date.now() - awaySince < GRACE) return; // keep what is drawn for now
@@ -278,7 +284,6 @@ W['discord-bar'] = {
       box.replaceChildren(h('div', 'dcb' + (live ? ' live' : ''),
         h('div', 'dcb-info',
           h('div', 'dcb-head', icon('volume-2', 'dcb-vi'), h('b', 'dcb-name', s.channelName || ''), live ? h('span', 'dcb-badge', t('w.discord.live')) : null, here?.guild ? h('span', 'dcb-guild', here.guild) : null),
-          live && share.name ? h('div', 'dcb-sub', t('w.discord.sharing', { name: share.name })) : null,
           h('div', 'dcb-chips', ...chips),
           h('div', 'dcb-stack', ...stack, s.members.length > 5 ? h('span', 'dcb-av dcb-more', '+' + (s.members.length - 5)) : null)),
         h('div', 'dcb-btns n' + btns.length, ...btns)));
@@ -302,7 +307,7 @@ W['discord-bar'] = {
       loadShare().then(() => render());
     };
     // 'fast' also counts down the grace period before hiding
-    return { update: (kind) => { poll(); pollShare(); if (kind !== 'fast' || awaySince) render(); } };
+    return { update: (kind) => { if (destroyed) return; poll(); pollShare(); if (kind !== 'fast' || awaySince) render(); }, destroy: () => { destroyed = true; } };
   },
 };
 
@@ -692,6 +697,7 @@ W.discord = {
     // 'fast' (every 250 ms) drives the asking; 'tick' (every second) also redraws when the widget's size changes
     // the current-channel bar's Screen and Chat buttons: open that view, one at a time as the buttons above do
     const wanted = () => {
+      if (box.closest('.stack-item')) return; // the request is for a Discord widget on the page itself, not a stack card
       const to = data && dcTake(page, visible());
       if (to === 'share' && data.share) { shareOpen = true; chatOpen = false; picking = false; pickGuild = null; share = null; loadShare().then(() => render(true)); render(true); }
       if (to === 'chat' && data.chat) { chatOpen = true; shareOpen = false; picking = false; pickGuild = null; chat = null; loadChat().then(() => render(true)); render(true); }

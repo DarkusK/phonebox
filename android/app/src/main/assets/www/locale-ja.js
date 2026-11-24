@@ -1044,7 +1044,7 @@ window.PhoneBoxLocaleData = Object.assign(window.PhoneBoxLocaleData || {}, {
       "Discord current channel": "Discord の現在のチャンネル",
       "The voice channel you are in, who is there and mute / deafen / leave (with screen share and chat when they are on) as a bar that fits any size. Outside a voice channel it hides and the widgets next to it take its place.": "参加中のボイスチャンネル、そこにいる人、ミュート / スピーカーミュート / 退出ボタン（オンのときは画面共有とチャットも）を、どのサイズにも収まるバーで表示します。ボイスチャンネルにいないときは非表示になり、隣のウィジェットがその場所を使います。",
       "Hide outside a voice channel (the widgets next to it take its place)": "ボイスチャンネルにいないときは隠す（隣のウィジェットがその場所を使います）",
-      "Allow mute, deafen and leave from the phone": "スマホからのミュート、スピーカーミュート、退出を許可",
+      "Allow mute, deafen, leave and stopping a screen share from the phone": "スマホからのミュート、スピーカーミュート、退出、画面共有の停止を許可",
       "Allow recording, streaming and scene switching from the phone": "電話からの録画、ストリーミング、シーン切り替えを許可",
       "Allow start / stop / restart from the phone": "電話からの開始/停止/再起動を許可",
       "Allow switching from the phone": "電話からの切り替えを許可",
