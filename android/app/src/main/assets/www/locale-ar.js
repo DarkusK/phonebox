@@ -1070,7 +1070,7 @@ window.PhoneBoxLocaleData = Object.assign(window.PhoneBoxLocaleData || {}, {
       "Discord current channel": "Discord: القناة الحالية",
       "The voice channel you are in, who is there and mute / deafen / leave (with screen share and chat when they are on) as a bar that fits any size. Outside a voice channel it hides and the widgets next to it take its place.": "القناة الصوتية التي أنت فيها ومن فيها وأزرار كتم الميكروفون / كتم الصوت / المغادرة (مع مشاركة الشاشة والدردشة عند تفعيلهما) كشريط يناسب أي حجم. خارج القناة الصوتية يختفي وتأخذ الأدوات المجاورة مكانه.",
       "Hide outside a voice channel (the widgets next to it take its place)": "الإخفاء خارج القناة الصوتية (تأخذ الأدوات المجاورة مكانه)",
-      "Allow mute, deafen and leave from the phone": "السماح بكتم الميكروفون وكتم الصوت والمغادرة من الهاتف",
+      "Allow mute, deafen, leave and stopping a screen share from the phone": "السماح من الهاتف بكتم الميكروفون وكتم الصوت والمغادرة وإيقاف مشاركة الشاشة",
       "Allow recording, streaming and scene switching from the phone": "السماح بالتسجيل، والبث المباشر والتحول المشهد من الهاتف",
       "Allow start / stop / restart from the phone": "السماح بالبدء / التوقف / إعادة البدء من الهاتف",
       "Allow switching from the phone": "السماح بالتحويل من الهاتف",

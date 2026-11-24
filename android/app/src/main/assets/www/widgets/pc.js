@@ -132,7 +132,7 @@ W.obs = {
 
 // local tweak: Russian for the tablet build's own texts (YouTube Music, the games-only share list)
 const dcL = (en, ru) => (String(LOCALE || '').toLowerCase().startsWith('ru') ? ru : en);
-// ---- Discord "focus" layout and the current-channel bar ----------------------------------------------------------
+// ---- Discord: the side by side layout and the current-channel bar (as in the upstream pull requests) ----
 const dcImg = (kind, id, hash) => `${API}/discord/img?kind=${kind}&id=${encodeURIComponent(id)}&hash=${encodeURIComponent(hash)}`;
 // a round logo: the image once it has loaded, the first letter until then (and when there is no image)
 const dcIco = (src, name, cls) => {
@@ -183,6 +183,7 @@ const dcShareAct = async (action, pid) => {
 };
 const dcLive = () => h('span', 'dcf-badge', t('w.discord.live'));
 const dcVisible = (box, page) => box.isConnected && !document.hidden && pages[curPage] === page && !box.closest('.stack-item:not(.active)');
+
 // The bar asks the Discord widget to open a tab: go to the first page that holds one; only a Discord widget on that
 // page picks the request up, once it is on screen. A Discord widget inside a Smart Stack is not looked for: the stack
 // shows one card at a time, so the request could not say which.
@@ -201,7 +202,7 @@ const dcTake = (page, shown) => {
   return tab;
 };
 
-// The Discord widget's "focus" layout, sized for a tablet or a large widget: on the left the server switcher (with the
+// The Discord widget's "side by side" layout (layout: focus), sized for a tablet or a large widget: on the left the server switcher (with the
 // servers used lately), the channel you are in with who is there, and round call buttons (mic, sound, screen share,
 // chat, leave); on the right tabs for the chosen server's voice channels, the chat and the screen share. Uses the same
 // agent endpoints as the list layout.
@@ -209,7 +210,7 @@ const dcFocus = {
   create(box, { o, page }) {
     box.classList.add('dcf');
     let data = null, lastKey = '', busy = null;
-    let sel = null, picking = false, seenChannel = null;
+    let sel = null, picking = false, seenChannel = null, lastView = '';
     let tab = 'chan', share = null, shareBusy = null, shareWaiting = 0, shareNext = 0;
     let chat = null, chatPick = false, pickGuild = null, chatAsked = 0, chatWaiting = 0, chatNext = 0;
     const load = async () => { try { data = await api('/discord'); } catch (_) {} };
@@ -242,6 +243,8 @@ const dcFocus = {
       } catch (_) {} finally { chatWaiting--; }
     };
     const openTab = (to) => {
+      // leaving the share view: the shared app's name and the window list are not kept around
+      if (tab === 'share' && to !== 'share' && share) share = { ...share, name: null, apps: null };
       tab = to; picking = false; chatPick = false; pickGuild = null;
       if (to === 'chat') { chat = null; loadChat().then(() => render(true)); }
       if (to === 'share') loadShare(true).then(() => render(true));
@@ -363,11 +366,11 @@ const dcFocus = {
     };
 
     const renderFocus = (s, ctl) => {
-      const joinCtl = data.joinControl ?? ctl; // an older agent doesn't say: the general flag then
       const servers = new Map();
       for (const c of s.channels) { const g = dcGid(c); if (!servers.has(g)) servers.set(g, []); servers.get(g).push(c); }
       const here = s.channelId ? s.channels.find((c) => c.id === s.channelId) : null;
-      if (s.channelId !== seenChannel) {
+      // Discord lists the channels one server at a time: until the one you are in has come in, it is looked for again
+      if (s.channelId !== seenChannel && (here || !s.channelId)) {
         seenChannel = s.channelId;
         if (here) { sel = dcGid(here); dcRecent(sel); store.set('dc-last', { id: here.id }); }
       }
@@ -387,7 +390,7 @@ const dcFocus = {
       // voice activity when the widget may switch the input mode.
       const ptt = () => {
         if (s.inputMode !== 'PUSH_TO_TALK' || s.pttKey) return null;
-        const fix = joinCtl ? h('button', 'dcf-warnbtn' + (busy === 'inputmode' ? ' busy' : ''), t('w.a.useVoiceActivity')) : null;
+        const fix = ctl ? h('button', 'dcf-warnbtn' + (busy === 'inputmode' ? ' busy' : ''), t('w.a.useVoiceActivity')) : null;
         if (fix) { if (!busy) fix.addEventListener('click', () => act('inputmode')); else fix.disabled = true; }
         return h('div', 'dcf-warn', h('span', null, t('w.discord.pttNoKey')), fix);
       };
@@ -408,7 +411,7 @@ const dcFocus = {
         const lastId = store.get('dc-last', null)?.id;
         const last = o.channels !== false && lastId ? s.channels.find((c) => c.id === lastId) : null;
         const back = last ? h('button', 'dcf-back', icon('rotate-ccw'), h('span', null, t('w.discord.backTo', { name: last.name + (last.guild ? ' · ' + last.guild : '') }))) : null;
-        if (back) { if (joinCtl && !busy) back.addEventListener('click', () => act('join', last.id)); else back.disabled = true; }
+        if (back) { if (ctl && !busy) back.addEventListener('click', () => act('join', last.id)); else back.disabled = true; }
         mid = h('div', 'dcf-empty', h('span', 'dcf-eico', icon('volume-x')), h('div', 'dcf-name', t('w.discord.notInChannel')),
           h('div', 'dcf-hint', t('w.discord.tapToJoin')), back);
       }
@@ -431,7 +434,11 @@ const dcFocus = {
       const hasShare = !!data.share, hasChat = !!data.chat;
       if ((tab === 'share' && !hasShare) || (tab === 'chat' && !hasChat)) tab = 'chan';
       const calls = [call('mute'), call('deafen'), hasShare ? tabCall('share') : null, hasChat ? tabCall('chat') : null, call('leave')].filter(Boolean);
-      const left = h('div', 'dcf-left', h('div', 'dcf-top', switcher, ...recents), mid, h('div', 'dcf-calls' + (calls.length > 3 ? ' many' : ''), ...calls));
+      // with the Channels option off there are no servers to pick, as in the list layout
+      const showChannels = o.channels !== false;
+      if (!showChannels) picking = false;
+      const left = h('div', 'dcf-left', showChannels ? h('div', 'dcf-top', switcher, ...recents) : null, mid,
+        h('div', 'dcf-calls' + (calls.length > 3 ? ' many' : ''), ...calls));
       const tabs = hasShare || hasChat ? h('div', 'dcf-tabs', ...[['chan', 'w.discord.channelsTab'], hasChat && ['chat', 'w.discord.chat'], hasShare && ['share', 'w.discord.share']]
         .filter(Boolean).map(([k, key]) => {
           const b = h('button', 'dcf-tab' + (tab === k ? ' on' : ''), t(key),
@@ -450,12 +457,13 @@ const dcFocus = {
         })));
       } else {
         // the channel you are in comes first
-        const chans = o.channels === false ? [] : [...(servers.get(sel) || [])].sort((a, b) => (b.id === s.channelId) - (a.id === s.channelId));
-        right = h('div', 'dcf-right', tabs, h('div', 'dcf-cap', t('w.discord.channelsOf', { name: sel ? sname(sel) : '' })), h('div', 'dcf-grid', ...chans.map((c) => {
-          const b = h('button', 'dcf-chan' + (c.id === s.channelId ? ' cur' : '') + (busy === 'join' + c.id ? ' busy' : ''), icon('volume-2'), h('span', null, c.name));
-          if (joinCtl && !busy && c.id !== s.channelId) b.addEventListener('click', () => act('join', c.id));
-          return b;
-        })));
+        const chans = showChannels ? [...(servers.get(sel) || [])].sort((a, b) => (b.id === s.channelId) - (a.id === s.channelId)) : [];
+        right = h('div', 'dcf-right', tabs, showChannels ? h('div', 'dcf-cap', t('w.discord.channelsOf', { name: sel ? sname(sel) : '' })) : null,
+          showChannels ? h('div', 'dcf-grid', ...chans.map((c) => {
+            const b = h('button', 'dcf-chan' + (c.id === s.channelId ? ' cur' : '') + (busy === 'join' + c.id ? ' busy' : ''), icon('volume-2'), h('span', null, c.name));
+            if (ctl && !busy && c.id !== s.channelId) b.addEventListener('click', () => act('join', c.id));
+            return b;
+          })) : null);
         if (o.notifications !== false && s.notifications?.length) {
           right.append(h('div', 'dcf-notes', ...s.notifications.slice(0, 4).map((n) => h('div', 'dcf-ntf', h('b', null, n.title), h('span', null, n.body)))));
         }
@@ -464,10 +472,14 @@ const dcFocus = {
       const oldList = box.querySelector('.dcf-msgs');
       const stick = !oldList || oldList.scrollHeight - oldList.scrollTop - oldList.clientHeight < 40;
       const oldTop = oldList?.scrollTop ?? 0;
-      const wrapTop = box.querySelector('.dcf-wrap')?.scrollTop ?? 0;
+      // Almost any change redraws (a member muting, a notification): the scrolled places stay where they were, as long
+      // as the same view is shown (another tab, or the server list, starts at the top).
+      const view = tab + (picking ? ':servers' : '') + (chatPick ? ':picker:' + (pickGuild || '') : '');
+      const places = view === lastView ? ['.dcf-wrap', '.dcf-right', '.dcf-plist'].map((q) => box.querySelector(q)?.scrollTop ?? 0) : [0, 0, 0];
+      lastView = view;
       const wrap = h('div', 'dcf-wrap', left, right);
       box.replaceChildren(wrap);
-      wrap.scrollTop = wrapTop;
+      ['.dcf-wrap', '.dcf-right', '.dcf-plist'].forEach((q, i) => { const el = box.querySelector(q); if (el) el.scrollTop = places[i]; });
       const list = box.querySelector('.dcf-msgs');
       if (list) list.scrollTop = stick ? list.scrollHeight : oldTop;
     };
@@ -509,12 +521,11 @@ const dcFocus = {
       chatNext = Date.now() + 2000;
       loadChat().then(() => render());
     };
-    // the bar's Screen and Chat buttons: open that tab once this page is on screen
-    const wanted = () => { const to = data && dcTake(page, visible()); if (to) openTab(to); };
     // 'fast' (every 250 ms) drives the asking; 'tick' (every second) also redraws when the widget's size changes
-    return { update: (kind) => { poll(); pollShare(); pollChat(); wanted(); if (kind !== 'fast') render(); } };
+    return { update: (kind) => { poll(); pollShare(); pollChat(); if (kind !== 'fast') render(); } };
   },
 };
+
 
 // The voice channel you are in as a bar any page can hold: the channel, who is there and mic / sound / screen / chat /
 // leave. Its layout follows its size in the grid (style.css, container queries). Outside a voice channel it hides and
@@ -539,7 +550,9 @@ W['discord-bar'] = {
       await new Promise((done) => setTimeout(done, 600));
       await load(); busy = null; render(true);
     };
-    const hide = (v) => { if (box.hidden !== v) { box.hidden = v; reflow?.(); } };
+    // after a rebuild (a rotation, a settings save) a late answer must not reflow the old page
+    let destroyed = false;
+    const hide = (v) => { if (!destroyed && box.hidden !== v) { box.hidden = v; reflow?.(); } };
     // It hides only on a page grid that can give its rows away (a Smart Stack card has no reflow), never in the
     // settings' live preview, and only once the agent has answered, so it doesn't blink away while the page loads.
     const canHide = o.autoHide !== false && !!reflow && !PREVIEW;
@@ -547,10 +560,14 @@ W['discord-bar'] = {
     // widgets around it don't jump for a blip.
     const GRACE = 3000;
     let shownIn = false, awaySince = 0;
+    // Start hidden where it may hide, so the widgets around it don't jump when the first answer says you are not in a
+    // channel; the page gives its rows away once every widget is in place.
+    if (canHide) { box.hidden = true; queueMicrotask(() => { if (!destroyed) reflow(); }); }
     const render = (force = false) => {
       const s = data?.snapshot;
       if (!s?.channelId || !data.enabled || !s.connected) {
-        if (canHide && data) {
+        if (canHide) {
+          if (!data) return; // still hidden until the agent answers
           if (!shownIn) { lastKey = ''; hide(true); return; }
           awaySince ||= Date.now();
           if (Date.now() - awaySince < GRACE) return; // keep what is drawn for now
@@ -600,7 +617,6 @@ W['discord-bar'] = {
       box.replaceChildren(h('div', 'dcb' + (live ? ' live' : ''),
         h('div', 'dcb-info',
           h('div', 'dcb-head', icon('volume-2', 'dcb-vi'), h('b', 'dcb-name', s.channelName || ''), live ? h('span', 'dcb-badge', t('w.discord.live')) : null, here?.guild ? h('span', 'dcb-guild', here.guild) : null),
-          live && share.name ? h('div', 'dcb-sub', t('w.discord.sharing', { name: share.name })) : null,
           h('div', 'dcb-chips', ...chips),
           h('div', 'dcb-stack', ...stack, s.members.length > 5 ? h('span', 'dcb-av dcb-more', '+' + (s.members.length - 5)) : null)),
         h('div', 'dcb-btns n' + btns.length, ...btns)));
@@ -624,7 +640,7 @@ W['discord-bar'] = {
       loadShare().then(() => render());
     };
     // 'fast' also counts down the grace period before hiding
-    return { update: (kind) => { poll(); pollShare(); if (kind !== 'fast' || awaySince) render(); } };
+    return { update: (kind) => { if (destroyed) return; poll(); pollShare(); if (kind !== 'fast' || awaySince) render(); }, destroy: () => { destroyed = true; } };
   },
 };
 
@@ -634,7 +650,7 @@ W['discord-bar'] = {
 W.discord = {
   needs: ['tick', 'fast'],
   create(box, ctx) {
-    // "focus" (the default) is its own body above; "list" is the server list below
+    // local tweak: the side by side layout is this build's default; "list" is below
     if ((ctx.o.layout || 'focus') === 'focus') return dcFocus.create(box, ctx);
     const { o, page, w } = ctx;
     let data = null, lastKey = '', busy = null;
@@ -1017,6 +1033,7 @@ W.discord = {
     // 'fast' (every 250 ms) drives the asking; 'tick' (every second) also redraws when the widget's size changes
     // the current-channel bar's Screen and Chat buttons: open that view, one at a time as the buttons above do
     const wanted = () => {
+      if (box.closest('.stack-item')) return; // the request is for a Discord widget on the page itself, not a stack card
       const to = data && dcTake(page, visible());
       if (to === 'share' && data.share) { shareOpen = true; chatOpen = false; picking = false; pickGuild = null; share = null; loadShare().then(() => render(true)); render(true); }
       if (to === 'chat' && data.chat) { chatOpen = true; shareOpen = false; picking = false; pickGuild = null; chat = null; loadChat().then(() => render(true)); render(true); }

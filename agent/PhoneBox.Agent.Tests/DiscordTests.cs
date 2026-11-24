@@ -128,6 +128,52 @@ public sealed class DiscordTests : IDisposable
         Assert.True(DiscordMonitor.ControlAllowed(Config(), "join"));
     }
 
+    // ---- the bar inside a Smart Stack: an enabled card counts like a widget on the page ----
+
+    private void StackWithBar(bool cardEnabled, bool pageEnabled)
+    {
+        File.WriteAllText(_configPath, JsonSerializer.Serialize(new
+        {
+            discord = new { enabled = true, clientId = "1", clientSecret = "s", screenShare = true },
+            pages = new[]
+            {
+                new { id = "p", title = "P", enabled = pageEnabled, widgets = new object[] { new { id = "s", type = "stack", x = 0, y = 0, w = 6, h = 2, options = new
+                {
+                    widgets = new object[] { new { id = "n", type = "note", options = new { text = "front" } }, new { id = "b", type = "discord-bar", enabled = cardEnabled, options = new { control = true } } },
+                } } } },
+                new { id = "q", title = "Q", enabled = true, widgets = Array.Empty<object>() },
+            },
+        }));
+    }
+
+    [Fact]
+    public async Task A_bar_card_in_an_enabled_stack_allows_what_the_bar_does()
+    {
+        StackWithBar(cardEnabled: true, pageEnabled: true);
+        var cfg = Config();
+        Assert.True(DiscordMonitor.BarControl(cfg));
+        foreach (var action in DiscordMonitor.BarActions) Assert.True(DiscordMonitor.ControlAllowed(cfg, action), action);
+        Assert.False(DiscordMonitor.ControlAllowed(cfg, "join"));
+        Assert.True(DiscordMonitor.ShareStateWanted(cfg));
+        var monitor = new DiscordMonitor(new ConfigStore(_configPath), NullLogger<DiscordMonitor>.Instance);
+        Assert.NotEqual("control", (await monitor.ShareActAsync("stop", null))?.Code);
+        Assert.Equal("control", (await monitor.ShareActAsync("pick", null))?.Code);
+    }
+
+    [Theory]
+    [InlineData(false, true)]  // the card is switched off in the stack
+    [InlineData(true, false)]  // the stack is on a page that is switched off
+    public async Task A_bar_card_that_is_off_allows_nothing(bool cardEnabled, bool pageEnabled)
+    {
+        StackWithBar(cardEnabled, pageEnabled);
+        var cfg = Config();
+        Assert.False(DiscordMonitor.BarControl(cfg));
+        Assert.False(DiscordMonitor.ControlAllowed(cfg, "mute"));
+        Assert.False(DiscordMonitor.ShareStateWanted(cfg));
+        var monitor = new DiscordMonitor(new ConfigStore(_configPath), NullLogger<DiscordMonitor>.Instance);
+        Assert.Equal("control", (await monitor.ShareActAsync("stop", null))?.Code);
+    }
+
     // ---- the global "allow control" switch (for shortcuts and custom widgets) ----
 
     [Fact]

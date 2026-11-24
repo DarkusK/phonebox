@@ -1036,7 +1036,7 @@ window.PhoneBoxLocaleData = Object.assign(window.PhoneBoxLocaleData || {}, {
       "Discord current channel": "Discord: aktuální kanál",
       "The voice channel you are in, who is there and mute / deafen / leave (with screen share and chat when they are on) as a bar that fits any size. Outside a voice channel it hides and the widgets next to it take its place.": "Hlasový kanál, ve kterém jste, kdo v něm je, a ztlumení / vypnutí zvuku / odchod (se sdílením obrazovky a chatem, když jsou zapnuté) jako lišta, která se vejde do jakékoli velikosti. Mimo hlasový kanál se skryje a jeho místo zaberou sousední widgety.",
       "Hide outside a voice channel (the widgets next to it take its place)": "Skrýt mimo hlasový kanál (jeho místo zaberou sousední widgety)",
-      "Allow mute, deafen and leave from the phone": "Povolit ztlumení, vypnutí zvuku a odchod z telefonu",
+      "Allow mute, deafen, leave and stopping a screen share from the phone": "Povolit z telefonu ztlumení, vypnutí zvuku, odchod a zastavení sdílení obrazovky",
       "Allow recording, streaming and scene switching from the phone": "Umožňuje nahrávání, streamování a přepínání scén z telefonu",
       "Allow start / stop / restart from the phone": "Povolit start / stop / restart z telefonu",
       "Allow switching from the phone": "Povolit přepínání z telefonu",
