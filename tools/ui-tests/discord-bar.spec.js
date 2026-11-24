@@ -125,6 +125,16 @@ test('Screen opens the share view of the Discord widget, and Stop ends a share f
   await expect(page.locator('.dcb-btn.share:not(.live)')).toBeVisible({ timeout: 6000 });
 });
 
+test('Screen opens the share tab in the side-by-side Discord layout', async ({ page }) => {
+  await show(page, [bar('b', 0, 0, 12, 1)], {
+    more: [{ id: 'dc', title: 'Discord', enabled: true, widgets: [
+      { id: 'd', type: 'discord', x: 0, y: 0, w: 12, h: 6, options: { control: true, layout: 'focus' } },
+    ] }],
+  });
+  await page.locator('.dcb-btn.share').click();
+  await expect(page.getByRole('button', { name: 'Space Racers' })).toBeVisible();
+});
+
 test("the bar's own Control does not start shares or join channels", async ({ page }) => {
   await show(page, [bar('b', 0, 0, 12, 1)], { more: [{ id: 'dc', title: 'Discord', enabled: true, widgets: [{ id: 'd', type: 'discord', x: 0, y: 0, w: 12, h: 6, options: { control: false } }] }] });
   await expect(page.locator('.dcb-name')).toHaveText('Game night');

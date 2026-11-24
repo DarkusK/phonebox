@@ -22,6 +22,12 @@ public sealed partial class DiscordMonitor
 {
     /// <summary>The most apps listed.</summary>
     internal const int ShareAppsMax = 30;
+    /// <summary>Discord's builds on Windows: the process name and the folder under %LOCALAPPDATA% that holds its Update.exe.</summary>
+    internal static readonly (string Process, string Folder)[] DiscordBuilds = [("Discord", "Discord"), ("DiscordPTB", "DiscordPTB"), ("DiscordCanary", "DiscordCanary")];
+
+    /// <summary>The builds to bring forward, the one the agent is connected to first (it opened the picker), then the others in order.</summary>
+    internal static IEnumerable<(string Process, string Folder)> BuildsFor(string? connected) =>
+        DiscordBuilds.OrderBy(b => string.Equals(b.Process, connected, StringComparison.OrdinalIgnoreCase) ? 0 : 1);
     /// <summary>How long a direct share may take to start before the phone is told to use the picker.</summary>
     internal TimeSpan ShareStartWait = TimeSpan.FromSeconds(4); // internal: tests wait less
     /// <summary>How long a stop waits for a late "ended" event from Discord before it sends the toggle.</summary>
@@ -181,7 +187,7 @@ public sealed partial class DiscordMonitor
             if (_sharing == true && _shareName is null) _sharePicked = _shareApps.FirstOrDefault(a => a.Pid == _sharePid)?.Name ?? _sharePicked;
             return new { enabled = true, ready = true, inCall = s.ChannelId is not null, active = _sharing,
                 // the name of what is shared goes with the share view only, like the app list (PRIVACY.md); a state-only
-                // answer (the bar's Live badge) says only whether you share
+                // answer (the Live badge during a call) says only whether you share
                 name = apps ? _shareName ?? _sharePicked : null, apps = apps ? _shareApps.ToList() : null };
         }
     }
@@ -245,6 +251,9 @@ public sealed partial class DiscordMonitor
             // Until Discord's next state event (about a third of a second later) a second stop would start the share
             // again. Not after "pick": a cancelled picker sends no event.
             if (action == "stop") lock (_lock) if (_sharing == true) _sharing = null;
+            // Discord draws its picker inside its own window: bring that window up, or the picker opens unseen behind
+            // other windows (or with Discord in the tray)
+            if (action == "pick") _ = Task.Run(ShowDiscordAsync);
             if (action != "app") return null;
             // Discord starts a direct share only for what it can capture that way (games it detects); for anything else it
             // quietly does nothing. Watch for the share to start rather than guessing beforehand.
@@ -254,6 +263,42 @@ public sealed partial class DiscordMonitor
         }
         catch (Exception ex) { return new("failed", ex.Message); }
         finally { _shareAct.Release(); }
+
+        async Task ShowDiscordAsync()
+        {
+#if WINDOWS
+            try
+            {
+                // the build this agent talks to first: that is where Discord opened the picker
+                var connected = _ipcProcess;
+                foreach (var (process, folder) in BuildsFor(connected))
+                {
+                    var running = Process.GetProcessesByName(process);
+                    var any = running.Length > 0;
+                    foreach (var p in running) p.Dispose();
+                    if (!any) continue;
+                    if (WindowsDeckNative.Focus(process)) return;
+                    // In the tray it has no window to raise: starting it again from its own Update.exe shows the running
+                    // one (Discord stays single-instance). A fixed path; nothing from the request.
+                    var update = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), folder, "Update.exe");
+                    if (!File.Exists(update)) return;
+                    var start = new ProcessStartInfo(update) { UseShellExecute = false, CreateNoWindow = true };
+                    start.ArgumentList.Add("--processStart");
+                    start.ArgumentList.Add(process + ".exe");
+                    // It hands over to the running Discord and exits at once. One that hangs is ended after 15 s, or
+                    // when the agent stops, so it is never left behind.
+                    using var updater = Process.Start(start);
+                    if (updater is null) return;
+                    using var wait = CancellationTokenSource.CreateLinkedTokenSource(_life);
+                    wait.CancelAfter(TimeSpan.FromSeconds(15));
+                    try { await updater.WaitForExitAsync(wait.Token); }
+                    catch (OperationCanceledException) { try { updater.Kill(); } catch { } } // exited meanwhile
+                    return;
+                }
+            }
+            catch (Exception ex) { log.LogInformation("discord: could not bring Discord forward ({Msg})", ex.Message); }
+#endif
+        }
 
         DiscordShareError? Refusal()
         {

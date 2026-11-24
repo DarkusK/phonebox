@@ -41,6 +41,19 @@ Add a **Discord** widget to a page in the editor. Options:
 | Channels | Show your servers as tiles; tap one to see and join its voice channels |
 | Notifications | Show recent Discord notifications. PhoneBox only asks Discord for them, and only sends them to the phone, while a widget with this option on is on an enabled page |
 | Control | Allow mute, deafen, switching between voice activity and push to talk, leave and join from the phone. **Off by default** |
+| Layout | **Servers and their channels in a list** (the default) or **Side by side**, made for a tablet or a large widget |
+
+### Side by side
+
+The **Side by side** layout (`layout: focus`) puts on the left a server switcher with the servers you used lately, the
+voice channel you are in with who is there (the speaking ring as in the list), and round call buttons: mic, sound,
+leave, plus **Screen** and **Chat** when screen share and the chat are on. On the right, tabs: the chosen server's voice
+channels as big keys (the one you are in first), the chat and the screen share. Recent notifications show under the
+channels, and the push-to-talk warning under the members, as in the list. Outside a voice channel the left side offers
+**Back to** the channel you were in last. The phone keeps only ids for this, in the panel's local storage: the last
+channel's (`dc-last`) and the servers used lately (`dc-recent`, for the switcher); names always come from Discord. A narrow widget drops the button labels,
+and a phone-sized one stacks the two sides. Favourites, who is in each channel and the input mode button stay in the
+list layout.
 
 With both the widget's **Control** option and `discord.allowControl` (below) off, the widget only displays state. Joining
 works only for voice channels the agent already listed.
@@ -111,7 +124,9 @@ enabled page (`discord.allowControl` is not enough). Stopping a share is also al
 own **Control** on, which learns only *whether* you share, never the apps or the name. While you are in a voice channel:
 
 - **Choose on PC** asks Discord to share: it shows its own picker on the computer (screens and windows), or goes live
-  with the game it detects.
+  with the game it detects. Discord draws the picker inside its own window, so on Windows the agent then brings the
+  running Discord (stable, PTB or Canary) to the front; from the tray it starts that build's own
+  `%LOCALAPPDATA%\<build>\Update.exe --processStart`, which shows the running one.
 - The list below it holds the apps that have a window on this computer, **by name only** (no window titles), read only
   while the share view is open on the phone. Tapping one asks Discord to share that app. Discord shares directly only
   what it can (the games it detects); PhoneBox doesn't look games up anywhere, it watches whether the share starts and
