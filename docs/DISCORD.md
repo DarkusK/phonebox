@@ -41,6 +41,29 @@ Add a **Discord** widget to a page in the editor. Options:
 | Channels | Show your servers as tiles; tap one to see and join its voice channels |
 | Notifications | Show recent Discord notifications. PhoneBox only asks Discord for them, and only sends them to the phone, while a widget with this option on is on an enabled page |
 | Control | Allow mute, deafen, switching between voice activity and push to talk, leave and join from the phone. **Off by default** |
+| Layout | **Current channel side by side** (the default) or **Servers and their channels in a list** (the earlier layout, unchanged) |
+
+### Layouts
+
+**Current channel side by side** (`focus`, the default) is made for a tablet or a large widget. On the left: a server
+switcher with the servers you used lately, the voice channel you are in with who is there (the speaking ring as in the
+list), and round call buttons: mic, sound, leave, plus **Screen** and **Chat** when screen share and the chat are on. On
+the right, tabs: the chosen server's voice channels as big keys (the one you are in first), the chat and the screen
+share. Outside a voice channel the left side says so and offers **Back to** the channel you were in last. The microphone
+shows off while you are deafened, as in Discord.
+
+**Servers and their channels in a list** (`list`) is the earlier layout, with favourites, who is in each voice channel,
+the input mode button and notifications. Pick it in the widget's **Layout** option.
+
+### The current-channel bar
+
+The **Discord current channel** widget (`discord-bar`) is the voice channel you are in as a bar for any page: the
+channel, who is there and mic / sound / leave, plus **Screen** and **Chat** when they are on (they open those tabs of the
+Discord widget, which must be on a page; while you share, **Screen** stops the share). Wide it shows names and labelled
+buttons; narrower, round buttons and stacked avatars; less room drops sound, then chat, then screen. **Outside a voice
+channel it hides itself** and the widgets right below it (or above it) take its rows until you join again; turn
+**Hide outside a voice channel** off to keep it showing. Its own **Control** option (off by default) allows the buttons;
+it counts for `/api/discord` like the Discord widget's.
 
 With both the widget's **Control** option and `discord.allowControl` (below) off, the widget only displays state. Joining
 works only for voice channels the agent already listed.
@@ -91,7 +114,9 @@ needs the **Control** option of a Discord widget on an enabled page, `discord.al
 to the widget. While you are in a voice channel:
 
 - **Choose on PC** asks Discord to share: it shows its own picker on the computer (screens and windows), or goes live
-  with the game it detects.
+  with the game it detects. Discord draws the picker inside its own window, so on Windows the agent brings that window
+  to the front (and, when Discord sits in the tray, starts it again from its own `Update.exe`, which shows the running
+  one).
 - The list below it holds the apps that have a window on this computer, **by name only** (no window titles), read only
   while the share view is open on the phone. Tapping one asks Discord to share that app. Discord shares directly only
   what it can (the games it detects); PhoneBox doesn't look games up anywhere, it watches whether the share starts and

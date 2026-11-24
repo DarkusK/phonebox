@@ -13,18 +13,19 @@ public sealed class DiscordTests : IDisposable
 
     public void Dispose() { try { File.Delete(_configPath); } catch { } }
 
-    private DiscordMonitor Monitor(bool? control, bool pageEnabled = true, bool? notifications = null, bool discordEnabled = true, bool allowControl = false)
+    private DiscordMonitor Monitor(bool? control, bool pageEnabled = true, bool? notifications = null, bool discordEnabled = true, bool allowControl = false,
+        string type = "discord", bool chat = false)
     {
         var options = new Dictionary<string, object>();
         if (control is { } c) options["control"] = c;
         if (notifications is { } n) options["notifications"] = n;
         File.WriteAllText(_configPath, JsonSerializer.Serialize(new
         {
-            discord = new { enabled = discordEnabled, clientId = "1", clientSecret = "s", allowControl },
+            discord = new { enabled = discordEnabled, clientId = "1", clientSecret = "s", allowControl, chat },
             // At least one page must stay enabled (the config repairs an all-disabled list), so a second page holds no widgets.
             pages = new[]
             {
-                new { id = "p", title = "P", enabled = pageEnabled, widgets = new object[] { new { id = "d", type = "discord", x = 0, y = 0, w = 4, h = 5, options } } },
+                new { id = "p", title = "P", enabled = pageEnabled, widgets = new object[] { new { id = "d", type, x = 0, y = 0, w = 4, h = 5, options } } },
                 new { id = "q", title = "Q", enabled = true, widgets = Array.Empty<object>() },
             },
         }));
@@ -62,6 +63,36 @@ public sealed class DiscordTests : IDisposable
     {
         Monitor(control: true);
         Assert.True(DiscordMonitor.ControlAllowed(Config()));
+    }
+
+    // ---- the current-channel bar (discord-bar) ----
+
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public void The_bar_allows_control_only_with_its_own_option_on(bool? control, bool allowed)
+    {
+        Monitor(control, type: "discord-bar");
+        Assert.Equal(allowed, DiscordMonitor.ControlAllowed(Config()));
+        Assert.Equal(allowed, DiscordMonitor.WidgetControl(Config()));
+    }
+
+    [Fact]
+    public void The_bar_on_a_disabled_page_does_not_allow_control()
+    {
+        Monitor(control: true, pageEnabled: false, type: "discord-bar");
+        Assert.False(DiscordMonitor.ControlAllowed(Config()));
+    }
+
+    [Fact]
+    public void The_bar_wants_the_chat_like_the_widget_but_not_the_notifications()
+    {
+        Monitor(control: false, type: "discord-bar", chat: true);
+        Assert.True(DiscordMonitor.ChatWanted(Config()));
+        Assert.False(DiscordMonitor.NotificationsWanted(Config()));
+        Monitor(control: false, pageEnabled: false, type: "discord-bar", chat: true);
+        Assert.False(DiscordMonitor.ChatWanted(Config()));
     }
 
     // ---- the global "allow control" switch (for shortcuts and custom widgets) ----

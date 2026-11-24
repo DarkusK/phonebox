@@ -260,6 +260,7 @@ const ICONS = {
   'headphone-off': 'M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3|M3 3l18 18',
   'log-out': 'M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4|M10 17l-5-5 5-5|M5 12h12',
   'chevron-down': 'm6 9 6 6 6-6',
+  'chevron-right': 'm9 18 6-6-6-6',
   'arrow-left': 'M19 12H5|M12 19l-7-7 7-7',
   'thumbs-up': 'M7 10v11|M15 5.9 14 10h5.8a2 2 0 0 1 2 2.3l-1.4 7A2 2 0 0 1 18.4 21H7V10l4.3-7.4A1.8 1.8 0 0 1 15 4.2z',
   'thumbs-down': 'M17 14V3|M9 18.1 10 14H4.2a2 2 0 0 1-2-2.3l1.4-7A2 2 0 0 1 5.6 3H17v11l-4.3 7.4A1.8 1.8 0 0 1 9 19.8z',
@@ -1692,6 +1693,27 @@ export function buildDots() {
   dots.hidden = false;
   syncPagePauseUi();
   buildNavbar();
+}
+
+/** A widget that hides itself (box.hidden, like the Discord bar outside a voice channel) gives its cells away: the
+ *  widgets right below it whose columns lie within its own grow up into its rows; with none below, the ones right above
+ *  grow down. Shown again, all go back to their own cells. */
+export function reflowPage(pi) {
+  const items = mounted.filter((m) => m.pi === pi);
+  const area = new Map(items.map((m) => [m, { ...m.ctx.at }]));
+  for (const gone of items.filter((m) => m.ctx.box.hidden)) {
+    const g = gone.ctx.at;
+    const inside = (a) => a.x >= g.x && a.x + a.w <= g.x + g.w;
+    const shown = items.filter((m) => m !== gone && !m.ctx.box.hidden);
+    const below = shown.filter((m) => inside(area.get(m)) && area.get(m).y === g.y + g.h);
+    const above = shown.filter((m) => inside(area.get(m)) && area.get(m).y + area.get(m).h === g.y);
+    for (const m of below.length ? below : above) {
+      const a = area.get(m);
+      if (below.length) a.y = g.y;
+      a.h += g.h;
+    }
+  }
+  for (const m of items) { const a = area.get(m); m.ctx.box.style.gridArea = `${a.y + 1} / ${a.x + 1} / span ${a.h} / span ${a.w}`; }
 }
 
 export function updateDots() {

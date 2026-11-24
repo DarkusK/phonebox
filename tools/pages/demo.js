@@ -113,9 +113,9 @@
   const isObs = (type) => type === 'obs' || type.startsWith('obs-');
   // like AgentConfig.Widgets(enabledPagesOnly: true): what may control the computer comes from enabled pages only
   const shownWidgets = (c) => widgets({ ...c, pages: (c.pages || []).filter((p) => p.enabled !== false) });
-  const dcControl = (c) => shownWidgets(c).some((w) => w.type === 'discord' && w.options?.control === true); // DiscordMonitor.WidgetControl
+  const dcControl = (c) => shownWidgets(c).some((w) => (w.type === 'discord' || w.type === 'discord-bar') && w.options?.control === true); // DiscordMonitor.WidgetControl
   const dcShare = (c) => c.discord?.screenShare === true && dcControl(c); // DiscordMonitor.ShareWanted
-  const dcChat = (c) => c.discord?.chat === true && shownWidgets(c).some((w) => w.type === 'discord'); // DiscordMonitor.ChatWanted
+  const dcChat = (c) => c.discord?.chat === true && shownWidgets(c).some((w) => w.type === 'discord' || w.type === 'discord-bar'); // DiscordMonitor.ChatWanted
   const feedsCanOpen = (c) => shownWidgets(c).some((w) => w.type === 'feeds' && w.options?.open === true);
 
   // What the agent sends to a phone (AgentConfig.ToPublic): no commands, keys, tokens or what a rule matches on.
