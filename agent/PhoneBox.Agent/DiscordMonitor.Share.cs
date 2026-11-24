@@ -226,6 +226,8 @@ public sealed partial class DiscordMonitor
             // Until Discord's next state event (about a third of a second later) a second stop would start the share
             // again. Not after "pick": a cancelled picker sends no event.
             if (action == "stop") lock (_lock) if (_sharing == true) _sharing = null;
+            // Discord draws its picker inside its own window: bring that window up so the picker is seen (local tweak)
+            if (action == "pick") _ = Task.Run(ShowDiscord);
             if (action != "app") return null;
             // Discord starts a direct share only for what it can capture that way (games it detects); for anything else it
             // quietly does nothing. Watch for the share to start rather than guessing beforehand.
@@ -235,6 +237,24 @@ public sealed partial class DiscordMonitor
         }
         catch (Exception ex) { return new("failed", ex.Message); }
         finally { _shareAct.Release(); }
+
+        void ShowDiscord()
+        {
+#if WINDOWS
+            try
+            {
+                if (WindowsDeckNative.Focus("Discord")) return;
+                // in the tray it has no window to raise: starting it again shows the running one (Discord stays single-instance)
+                var update = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Discord", "Update.exe");
+                if (!File.Exists(update)) return;
+                var start = new System.Diagnostics.ProcessStartInfo(update) { UseShellExecute = false, CreateNoWindow = true };
+                start.ArgumentList.Add("--processStart");
+                start.ArgumentList.Add("Discord.exe");
+                System.Diagnostics.Process.Start(start)?.Dispose();
+            }
+            catch (Exception ex) { log.LogInformation("discord: could not bring Discord forward ({Msg})", ex.Message); }
+#endif
+        }
 
         DiscordShareError? Refusal()
         {
