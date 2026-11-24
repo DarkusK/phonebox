@@ -85,7 +85,8 @@ Who can reach these actions:
 | The paired phone over Wi-Fi | `/api/discord` is on the Wi-Fi allow-list (`Lan.cs`), over TLS pinned to the paired certificate, with the paired key |
 
 The switch doesn't add a path or a new way in: it only stops requiring the widget, and any of the callers above can then
-act, not only the widget. With it off, nothing changes from before.
+act, not only the widget. With it off, the actions need a Discord widget with **Control** on, or a current-channel bar
+with its own **Control** on for `mute`, `deafen` and `leave`.
 
 ### Favourites and who is in a voice channel
 

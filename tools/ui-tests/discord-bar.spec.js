@@ -169,3 +169,22 @@ test('rebuilt outside a channel, the bar stays hidden: the widgets around it do 
   expect(seen).toBe(false);
   expect(await area(page, 'below')).toBe('1 / 1 / span 6 / span 12');
 });
+
+test('while you share, Stop stays inside even the smallest bar', async ({ page }) => {
+  await page.setViewportSize({ width: 780, height: 360 });
+  await show(page, [bar('b', 0, 0, 2, 1), note('rest', 2, 0, 10, 6)], {
+    more: [{ id: 'dc', title: 'Discord', enabled: true, widgets: [{ id: 'd', type: 'discord', x: 0, y: 0, w: 12, h: 6, options: { control: true } }] }] });
+  const b = page.locator('.w-discord-bar');
+  await expect(b.locator('.dcb-btn.mute')).toBeVisible();
+  // a share started by the Discord widget's Control
+  expect(await post(page, '/discord/share/app?pid=4242')).toBe(200);
+  const stop = b.locator('.dcb-btn.share.live');
+  await expect(stop).toBeVisible({ timeout: 6000 });
+  const box = await b.boundingBox();
+  for (const btn of [stop, b.locator('.dcb-btn.mute'), b.locator('.dcb-btn.leave')]) {
+    const r = await btn.boundingBox();
+    expect(r.y + r.height).toBeLessThanOrEqual(box.y + box.height + 0.5);
+    expect(r.x + r.width).toBeLessThanOrEqual(box.x + box.width + 0.5);
+    expect(r.x).toBeGreaterThanOrEqual(box.x - 0.5);
+  }
+});
