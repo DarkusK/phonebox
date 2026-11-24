@@ -46,7 +46,11 @@ if (-not $SkipApk) {
     $apk = "$src\android\app\build\outputs\apk\release\app-release.apk"
     # the install gets a time limit
     $job = Start-Job { adb install -r $using:apk 2>&1 }
-    if (Wait-Job $job -Timeout 120) { Receive-Job $job } else { Stop-Job $job; throw 'adb install timed out (try: adb kill-server)' }
+    if (-not (Wait-Job $job -Timeout 120)) { Stop-Job $job; throw 'adb install timed out (try: adb kill-server)' }
+    $out = Receive-Job $job | Out-String
+    $out.Trim()
+    # adb says Success only when the app was installed; an offline or missing device must not read as done
+    if ($out -notmatch '(?m)^Success') { throw 'APK not installed: adb did not report Success (is the tablet online in adb devices?)' }
     adb shell monkey -p net.oxog.phonebox.deskpanel -c android.intent.category.LAUNCHER 1 | Out-Null
     'APK installed'
 }
