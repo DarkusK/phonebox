@@ -44,7 +44,16 @@ public sealed partial class DiscordMonitor
     private volatile bool _shareRefused;   // Discord refused the subscription: off for this connection
     // Beside _act: a share that takes its time to start holds up only other share actions, not mute or push to talk.
     private readonly SemaphoreSlim _shareAct = new(1, 1);
-    internal Func<List<DiscordShareApp>> ListApps = () => RunningApps(); // internal: tests list their own
+    internal Func<List<DiscordShareApp>> ListApps = () => RunningApps(keep: ShareKeep(config, log)); // internal: tests list their own
+
+    /// <summary>
+    /// With "games only" on and Discord's list of detectable games known: only the apps Discord can share directly.
+    /// Otherwise null, and every app with a window is listed.
+    /// </summary>
+    private static Func<string?, string, bool>? ShareKeep(ConfigStore config, ILogger log) =>
+        config.Get().Discord.ShareGamesOnly && DiscordDetectable.Names(log) is { } names
+            ? (path, process) => DiscordDetectable.Matches(names, path) || DiscordDetectable.Matches(names, process + ".exe")
+            : null;
 
     /// <summary>
     /// The phone may see and do this: the setting is on, and a Discord widget has control on, on an enabled page.
@@ -105,8 +114,11 @@ public sealed partial class DiscordMonitor
     /// <summary>Whether you are sharing, as Discord last said; null before it has, and between a stop and Discord's next word.</summary>
     internal bool? Sharing { get { lock (_lock) return _sharing; } }
 
-    /// <summary>The apps with a window on this computer, by name only (no window titles), one per process. Windows only.</summary>
-    internal static List<DiscordShareApp> RunningApps(int max = ShareAppsMax)
+    /// <summary>
+    /// The apps with a window on this computer, by name only (no window titles or paths), one per process. With
+    /// <paramref name="keep"/>, only those it keeps (by executable path, when readable, and process name). Windows only.
+    /// </summary>
+    internal static List<DiscordShareApp> RunningApps(int max = ShareAppsMax, Func<string?, string, bool>? keep = null)
     {
         if (!OperatingSystem.IsWindows()) return [];
         var self = Environment.ProcessId;
@@ -118,8 +130,9 @@ public sealed partial class DiscordMonitor
                 try
                 {
                     if (p.Id == self || p.SessionId == 0 || ShareSkip.Contains(p.ProcessName) || p.MainWindowHandle == 0 || string.IsNullOrWhiteSpace(p.MainWindowTitle)) continue;
-                    string? name = null;
-                    try { name = p.MainModule?.FileVersionInfo.FileDescription; } catch { } // elevated or protected: the process name will do
+                    string? name = null, path = null;
+                    try { var module = p.MainModule; path = module?.FileName; name = module?.FileVersionInfo.FileDescription; } catch { } // elevated or protected: the process name will do
+                    if (keep is not null && !keep(path, p.ProcessName)) continue;
                     apps.Add(new(p.Id, string.IsNullOrWhiteSpace(name) ? p.ProcessName : name.Trim()));
                 }
                 catch { } // exited meanwhile
@@ -167,7 +180,8 @@ public sealed partial class DiscordMonitor
             if (!ShareOn || !_snap.Connected) return new { enabled = true, ready = false, refused = _shareRefused, error = _snap.Error };
             if (list is not null) { _shareApps = list; _shareAppsAt = Environment.TickCount64; }
             if (_sharing == true && _shareName is null) _sharePicked = _shareApps.FirstOrDefault(a => a.Pid == _sharePid)?.Name ?? _sharePicked;
-            return new { enabled = true, ready = true, inCall = s.ChannelId is not null, active = _sharing, name = _shareName ?? _sharePicked, apps = apps ? _shareApps.ToList() : null };
+            return new { enabled = true, ready = true, inCall = s.ChannelId is not null, active = _sharing, name = _shareName ?? _sharePicked, apps = apps ? _shareApps.ToList() : null,
+                gamesOnly = config.Get().Discord.ShareGamesOnly };
         }
     }
 

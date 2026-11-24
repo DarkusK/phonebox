@@ -730,8 +730,12 @@ const dcFocus = {
       const pick = h('button', 'dcf-pickpc' + (shareBusy === 'pick' ? ' busy' : ''), icon('monitor'), dcL('Choose on the PC', 'Выбрать на ПК'));
       if (c.inCall && !shareBusy) pick.addEventListener('click', () => shareAct('pick')); else pick.disabled = true;
       out.push(pick);
+      // with "games only" the agent lists only what Discord can share directly (the games it detects)
+      if (c.gamesOnly && c.apps && !c.apps.length) {
+        out.push(note(dcL('No running game that Discord shares directly: use Choose on the PC', 'Нет запущенных игр, которые Discord транслирует напрямую. Используйте «Выбрать на ПК»')));
+      }
       if (c.apps?.length) {
-        out.push(h('div', 'dcf-cap', dcL('Or a window right away', 'Или сразу окно')));
+        out.push(h('div', 'dcf-cap', c.gamesOnly ? dcL('Or a game right away', 'Или сразу игра') : dcL('Or a window right away', 'Или сразу окно')));
         out.push(h('div', 'dcf-grid', ...c.apps.map((a) => {
           const b = h('button', 'dcf-app' + (shareBusy === 'app' + a.pid ? ' busy' : ''), h('span', 'dcf-appi', (a.name || '?').trim().charAt(0).toUpperCase()), h('span', null, a.name));
           if (c.inCall && !shareBusy) b.addEventListener('click', () => shareAct('app', a.pid)); else b.disabled = true;

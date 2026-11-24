@@ -461,6 +461,11 @@ public sealed class DiscordConfig
     /// </summary>
     public bool ScreenShare { get; set; }
     /// <summary>
+    /// List only the apps Discord can share directly (the games it detects) under screen share. On by default; reads
+    /// Discord's public list of detectable games from discord.com once a day while screen share is used.
+    /// </summary>
+    public bool ShareGamesOnly { get; set; } = true;
+    /// <summary>
     /// The Discord widget's chat (read-only) and new-message dots: asks Discord for the <c>messages.read</c> scope (one
     /// more approval in Discord) and sends message text to the phone. Off by default. Message text stays in the agent's
     /// memory only, for as long as the connection to Discord lasts.
