@@ -50,7 +50,8 @@ voice channel you are in with who is there (the speaking ring as in the list), a
 leave, plus **Screen** and **Chat** when screen share and the chat are on. On the right, tabs: the chosen server's voice
 channels as big keys (the one you are in first), the chat and the screen share. Recent notifications show under the
 channels, and the push-to-talk warning under the members, as in the list. Outside a voice channel the left side offers
-**Back to** the channel you were in last (only its id is kept on the phone). A narrow widget drops the button labels,
+**Back to** the channel you were in last. The phone keeps only ids for this, in the panel's local storage: the last
+channel's (`dc-last`) and the servers used lately (`dc-recent`, for the switcher); names always come from Discord. A narrow widget drops the button labels,
 and a phone-sized one stacks the two sides. Favourites, who is in each channel and the input mode button stay in the
 list layout.
 

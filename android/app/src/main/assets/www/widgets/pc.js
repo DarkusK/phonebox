@@ -189,7 +189,7 @@ const dcFocus = {
   create(box, { o, page }) {
     box.classList.add('dcf');
     let data = null, lastKey = '', busy = null;
-    let sel = null, picking = false, seenChannel = null;
+    let sel = null, picking = false, seenChannel = null, lastView = '';
     let tab = 'chan', share = null, shareBusy = null, shareWaiting = 0, shareNext = 0;
     let chat = null, chatPick = false, pickGuild = null, chatAsked = 0, chatWaiting = 0, chatNext = 0;
     const load = async () => { try { data = await api('/discord'); } catch (_) {} };
@@ -222,6 +222,8 @@ const dcFocus = {
       } catch (_) {} finally { chatWaiting--; }
     };
     const openTab = (to) => {
+      // leaving the share view: the shared app's name and the window list are not kept around
+      if (tab === 'share' && to !== 'share' && share) share = { ...share, name: null, apps: null };
       tab = to; picking = false; chatPick = false; pickGuild = null;
       if (to === 'chat') { chat = null; loadChat().then(() => render(true)); }
       if (to === 'share') loadShare(true).then(() => render(true));
@@ -344,7 +346,8 @@ const dcFocus = {
       const servers = new Map();
       for (const c of s.channels) { const g = dcGid(c); if (!servers.has(g)) servers.set(g, []); servers.get(g).push(c); }
       const here = s.channelId ? s.channels.find((c) => c.id === s.channelId) : null;
-      if (s.channelId !== seenChannel) {
+      // Discord lists the channels one server at a time: until the one you are in has come in, it is looked for again
+      if (s.channelId !== seenChannel && (here || !s.channelId)) {
         seenChannel = s.channelId;
         if (here) { sel = dcGid(here); dcRecent(sel); store.set('dc-last', { id: here.id }); }
       }
@@ -408,7 +411,11 @@ const dcFocus = {
       const hasShare = !!data.share, hasChat = !!data.chat;
       if ((tab === 'share' && !hasShare) || (tab === 'chat' && !hasChat)) tab = 'chan';
       const calls = [call('mute'), call('deafen'), hasShare ? tabCall('share') : null, hasChat ? tabCall('chat') : null, call('leave')].filter(Boolean);
-      const left = h('div', 'dcf-left', h('div', 'dcf-top', switcher, ...recents), mid, h('div', 'dcf-calls' + (calls.length > 3 ? ' many' : ''), ...calls));
+      // with the Channels option off there are no servers to pick, as in the list layout
+      const showChannels = o.channels !== false;
+      if (!showChannels) picking = false;
+      const left = h('div', 'dcf-left', showChannels ? h('div', 'dcf-top', switcher, ...recents) : null, mid,
+        h('div', 'dcf-calls' + (calls.length > 3 ? ' many' : ''), ...calls));
       const tabs = hasShare || hasChat ? h('div', 'dcf-tabs', ...[['chan', 'w.discord.channelsTab'], hasChat && ['chat', 'w.discord.chat'], hasShare && ['share', 'w.discord.share']]
         .filter(Boolean).map(([k, key]) => {
           const b = h('button', 'dcf-tab' + (tab === k ? ' on' : ''), t(key),
@@ -427,12 +434,13 @@ const dcFocus = {
         })));
       } else {
         // the channel you are in comes first
-        const chans = o.channels === false ? [] : [...(servers.get(sel) || [])].sort((a, b) => (b.id === s.channelId) - (a.id === s.channelId));
-        right = h('div', 'dcf-right', tabs, h('div', 'dcf-cap', t('w.discord.channelsOf', { name: sel ? sname(sel) : '' })), h('div', 'dcf-grid', ...chans.map((c) => {
-          const b = h('button', 'dcf-chan' + (c.id === s.channelId ? ' cur' : '') + (busy === 'join' + c.id ? ' busy' : ''), icon('volume-2'), h('span', null, c.name));
-          if (ctl && !busy && c.id !== s.channelId) b.addEventListener('click', () => act('join', c.id));
-          return b;
-        })));
+        const chans = showChannels ? [...(servers.get(sel) || [])].sort((a, b) => (b.id === s.channelId) - (a.id === s.channelId)) : [];
+        right = h('div', 'dcf-right', tabs, showChannels ? h('div', 'dcf-cap', t('w.discord.channelsOf', { name: sel ? sname(sel) : '' })) : null,
+          showChannels ? h('div', 'dcf-grid', ...chans.map((c) => {
+            const b = h('button', 'dcf-chan' + (c.id === s.channelId ? ' cur' : '') + (busy === 'join' + c.id ? ' busy' : ''), icon('volume-2'), h('span', null, c.name));
+            if (ctl && !busy && c.id !== s.channelId) b.addEventListener('click', () => act('join', c.id));
+            return b;
+          })) : null);
         if (o.notifications !== false && s.notifications?.length) {
           right.append(h('div', 'dcf-notes', ...s.notifications.slice(0, 4).map((n) => h('div', 'dcf-ntf', h('b', null, n.title), h('span', null, n.body)))));
         }
@@ -441,10 +449,14 @@ const dcFocus = {
       const oldList = box.querySelector('.dcf-msgs');
       const stick = !oldList || oldList.scrollHeight - oldList.scrollTop - oldList.clientHeight < 40;
       const oldTop = oldList?.scrollTop ?? 0;
-      const wrapTop = box.querySelector('.dcf-wrap')?.scrollTop ?? 0;
+      // Almost any change redraws (a member muting, a notification): the scrolled places stay where they were, as long
+      // as the same view is shown (another tab, or the server list, starts at the top).
+      const view = tab + (picking ? ':servers' : '') + (chatPick ? ':picker:' + (pickGuild || '') : '');
+      const places = view === lastView ? ['.dcf-wrap', '.dcf-right', '.dcf-plist'].map((q) => box.querySelector(q)?.scrollTop ?? 0) : [0, 0, 0];
+      lastView = view;
       const wrap = h('div', 'dcf-wrap', left, right);
       box.replaceChildren(wrap);
-      wrap.scrollTop = wrapTop;
+      ['.dcf-wrap', '.dcf-right', '.dcf-plist'].forEach((q, i) => { const el = box.querySelector(q); if (el) el.scrollTop = places[i]; });
       const list = box.querySelector('.dcf-msgs');
       if (list) list.scrollTop = stick ? list.scrollHeight : oldTop;
     };

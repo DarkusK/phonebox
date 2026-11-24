@@ -95,10 +95,14 @@ test('outside a channel it offers the way back, keeping only the channel id on t
   await expect(page.locator('.dcf-name')).toHaveText('Game night');
 });
 
-test('with the Channels option off there are no channel keys and no way back', async ({ page }) => {
+test('with the Channels option off there are no servers, channel keys or way back', async ({ page }) => {
   await show(page, { options: { channels: false } });
   await expect(page.locator('.dcf-name')).toHaveText('Game night');
   await expect(page.locator('.dcf-chan')).toHaveCount(0);
+  // as in the list layout: no server switcher, no recent servers, no "Channels · …" caption
+  await expect(page.locator('.dcf-switch')).toHaveCount(0);
+  await expect(page.locator('.dcf-recent')).toHaveCount(0);
+  await expect(page.locator('.dcf-right .dcf-cap')).toHaveCount(0);
   await page.locator('.dcf-call.leave').click();
   await expect(page.locator('.dcf-empty')).toBeVisible();
   await expect(page.locator('.dcf-back')).toHaveCount(0);
@@ -112,4 +116,19 @@ test('a phone-sized widget stacks the two sides and keeps the buttons named', as
   expect(r.y).toBeGreaterThan(l.y + l.height - 2); // stacked, not side by side
   await expect(page.locator('.dcf-call.mute .dcf-cl')).toBeHidden();
   await expect(page.locator('.dcf-call.mute')).toHaveAttribute('aria-label', /.+/);
+});
+
+test('a redraw keeps the scrolled place on the right side', async ({ page }) => {
+  // a short widget, so the channel keys and the notification scroll
+  await show(page, { size: { w: 12, h: 2 }, viewport: { width: 780, height: 360 } });
+  const right = page.locator('.dcf-right');
+  await expect(page.locator('.dcf-chan').first()).toBeVisible();
+  const max = await right.evaluate((el) => el.scrollHeight - el.clientHeight);
+  expect(max).toBeGreaterThan(10);
+  await right.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  const before = await right.evaluate((el) => el.scrollTop);
+  // a change that redraws the widget (the mic): the place stays
+  await page.locator('.dcf-call.mute').click();
+  await expect(page.locator('.dcf-call.mute')).toHaveClass(/\bon\b/);
+  expect(await page.locator('.dcf-right').evaluate((el) => el.scrollTop)).toBe(before);
 });
