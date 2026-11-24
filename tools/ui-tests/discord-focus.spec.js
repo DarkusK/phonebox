@@ -145,3 +145,19 @@ test('leaving the share tab for the server list drops the shared app name too', 
   await page.waitForTimeout(4500);
   await expect(page.locator('.dcf-left')).not.toContainText('Space Racers');
 });
+
+test('screen share switched off on the computer drops the shared app name at once', async ({ page }) => {
+  await show(page);
+  await page.locator('.dcf-call.share').click();
+  await page.locator('.dcf-app', { hasText: 'Space Racers' }).click();
+  await expect(page.locator('.dcf-livebox')).toContainText('Space Racers');
+  // Settings › General › Discord › screen share off, saved on the computer
+  await page.evaluate(() => {
+    const c = JSON.parse(localStorage.getItem('pb-demo-config'));
+    c.discord = { ...c.discord, screenShare: false };
+    localStorage.setItem('pb-demo-config', JSON.stringify(c));
+  });
+  await expect(page.locator('.dcf-call.share')).toHaveCount(0, { timeout: 6000 });
+  await expect(page.locator('.w-discord')).not.toContainText('Space Racers');
+  await expect(page.locator('.dcf-badge')).toHaveCount(0);
+});
