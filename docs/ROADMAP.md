@@ -37,6 +37,31 @@ people who proposed or prototyped something are credited in the [changelog](../C
   General, all on by default, that the Clock's status line, Quotas and the Quota ring's picker follow unless a widget
   sets its own providers.
 
+- **Phone flashlight from the night screen** ([#369](https://github.com/ersinkoc/phonebox/issues/369)): a torch icon,
+  off by default, that turns on the phone's flash through Android's `CameraManager.setTorchMode` (no camera
+  permission) or fills the screen with white at full brightness; it turns off with a tap, after a set time, or when
+  the app leaves the screen or the screen goes off.
+- **Named quota accounts through ai-usagebar** ([#371](https://github.com/ersinkoc/phonebox/issues/371)), after #351:
+  an opt-in quota source, off by default, that runs `ai-usagebar usage --json` as a fixed command without a shell,
+  with a timeout and an output cap, and shows accounts such as `claude@personal` and `claude@work` as separate cards.
+  When it fails, the card says so; it never falls back to the built-in readers.
+- **Plex playlists** ([#379](https://github.com/ersinkoc/phonebox/issues/379)), the second of the two pull requests:
+  a playlist action, a playlist picker and a Plex playlists widget, on top of the Plex queue widget (#409). The token
+  goes only to the Plex server, and the phone sends ids only.
+- **A white theme and an e-ink option** ([#383](https://github.com/ersinkoc/phonebox/issues/383)), in two pull
+  requests: a pure white theme, then an "E-ink screen" option, off by default, with no pulsing or animations and a
+  slower refresh for fast widgets.
+- **Mics off, camera off** ([#387](https://github.com/ersinkoc/phonebox/issues/387)): an action next to panic that
+  mutes only the microphones and stops the OBS virtual camera. It doesn't touch the physical webcam and says so
+  instead of reporting success.
+- **The phone as a computer microphone** ([#465](https://github.com/ersinkoc/phonebox/issues/465), pull request
+  [#472](https://github.com/ersinkoc/phonebox/pull/472)): Windows only, off by default; Set up fetches scrcpy's
+  server (checked by its hash) and plays the phone's mic into a virtual audio cable. Without the adb server watchdog,
+  which needs its own pull request. Keeping a third-party webcam app running was declined.
+- **Cursor permission prompts on the phone** ([#467](https://github.com/ersinkoc/phonebox/issues/467), pull request
+  [#470](https://github.com/ersinkoc/phonebox/pull/470)): a Cursor hook, off by default, with the same
+  Allow / Deny flow as Claude Code.
+
 ## Open for a contributor
 
 Agreed in principle, not being built in-house. Say so on the issue before starting.
@@ -56,10 +81,6 @@ Agreed in principle, not being built in-house. Say so on the issue before starti
 - **Night screen as a rule action** ([#330](https://github.com/ersinkoc/phonebox/issues/330)): while a rule holds
   (for example *PC away for 5 minutes*), the phone shows the night screen at its own brightness, and goes back when the
   rule ends. The schedule stays as it is, and a tap still wakes the screen for a while.
-- **Night screen while the computer is unreachable** ([#347](https://github.com/ersinkoc/phonebox/issues/347)): an
-  option on the phone that dims to the night screen after the agent has been out of reach for a few minutes (USB
-  unplugged, the computer off or asleep), and wakes when it answers again. It has to be decided on the phone, since a
-  computer that is off runs no rules; the **Wake the PC** button stays reachable with a tap.
 - **Pushed values without refetching the whole list** ([#329](https://github.com/ersinkoc/phonebox/issues/329)): the
   change event carries the key and its new value, and the phone fetches all of `/api/push` again only when it missed a
   version. A value pushed every second, such as a game's FPS, then costs one small event instead of the full list.
@@ -68,6 +89,9 @@ Agreed in principle, not being built in-house. Say so on the issue before starti
   the timed lyric of the current track and follows the playback position. The agent looks the track up on LRCLIB
   (title, artist, album, duration) only when the user turns the lookup on and only while such a widget is on an enabled
   page; results stay in memory, and the phone never contacts LRCLIB.
+- **A sound for a new permission prompt** ([#497](https://github.com/ersinkoc/phonebox/issues/497)): an option to
+  play the panel's chime when an approval card appears, not only vibrate, with the same volume setting as a finished
+  session's sound ([#488](https://github.com/ersinkoc/phonebox/pull/488)) once that lands.
 - **A larger device switcher** ([#340](https://github.com/ersinkoc/phonebox/issues/340)): bigger touch targets for the
   computers in the all-pages overview, each with an icon (emoji or uploaded picture) and a colour set per computer.
 
@@ -81,8 +105,8 @@ Agreed in principle, not being built in-house. Say so on the issue before starti
   ([#215](https://github.com/ersinkoc/phonebox/issues/215)): needs a documented Antigravity hook that waits for an
   answer, like the one Claude Code has. A permission gate built on undocumented internals could approve the wrong
   thing after an Antigravity update.
-- **Power standby on Android 8+** ([#30](https://github.com/ersinkoc/phonebox/issues/30)): pull request
-  [#32](https://github.com/ersinkoc/phonebox/pull/32) was closed; a new pull request built on its review is welcome.
+- **Power standby on Android 8+** ([#30](https://github.com/ersinkoc/phonebox/issues/30)): continued from
+  [#32](https://github.com/ersinkoc/phonebox/pull/32) in the draft [#430](https://github.com/ersinkoc/phonebox/pull/430).
 
 ## Waiting on a report
 

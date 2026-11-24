@@ -2,16 +2,16 @@
 // that compared a localized label against the English word. Against the web demo, in German.
 const { test, expect } = require('@playwright/test');
 
-async function show(page, widgets) {
+async function show(page, widgets, display = { language: 'de' }) {
   await page.goto('/panel/');
-  await page.evaluate((widgets) => {
+  await page.evaluate(({ widgets, display }) => {
     localStorage.clear();
     localStorage.setItem('pb-demo-config', JSON.stringify({
       night: { enabled: false }, rules: [], shortcuts: [],
-      display: { language: 'de' },
+      display,
       pages: [{ id: 'one', title: 'One', widgets }],
     }));
-  }, widgets);
+  }, { widgets, display });
   await page.reload();
 }
 
@@ -270,7 +270,7 @@ test('the saved Japanese preference reaches the settings and the phone panel', a
   await expect(page.locator('#displayLangSel')).toHaveValue('ja');
   await page.goto('/panel/');
   await expect(page.locator('html')).toHaveAttribute('lang', 'ja');
-  await expect(page.locator('#dots')).toHaveAttribute('title', /[^\x00-\x7f]/);
+  await expect(page.locator('#dots .page-all')).toHaveAttribute('title', /[^\x00-\x7f]/);
 });
 
 test('Arabic pages still turn: the pager keeps scrolling left to right', async ({ page }) => {
@@ -348,3 +348,215 @@ test('follow system distinguishes Traditional Chinese and the legacy Indonesian 
   });
   expect(resolved).toEqual(['zh-Hant', 'zh-Hant', 'zh', 'id', 'en', 'en']);
 });
+
+
+for (const [language, direction, periods] of [['ar', 'rtl', ['ص', 'م']], ['en', 'ltr', ['am', 'pm']]]) {
+  test(`the clock is centered and keeps time in order (${language})`, async ({ page }) => {
+    await page.route('https://api.open-meteo.com/v1/forecast?*', route => route.fulfill({ json: {
+      current: { weather_code: 0, is_day: 1, temperature_2m: 16, apparent_temperature: 15 },
+      daily: { temperature_2m_max: [19], temperature_2m_min: [11] },
+    } }));
+    await show(page, [
+      { id: 'clock', type: 'clock', x: 0, y: 0, w: 6, h: 4, options: { providers: [], align: 'center' } },
+      { id: 'media', type: 'media', x: 6, y: 0, w: 6, h: 4 },
+    ], { language, hour12: true });
+    const clock = page.locator('.w-clock .clock');
+    const date = page.locator('.w-clock .date');
+
+    for (const [index, hour] of [10, 22].entries()) {
+      const time = await page.evaluate((hour) => new Date(2026, 0, 1, hour, 24, 35).getTime(), hour);
+      await page.clock.setFixedTime(time);
+      await page.evaluate(async () => (await import('/panel/main.js')).tick());
+      await expect(clock.locator('span')).toHaveText(['10', ':', '24', '35', periods[index]]);
+      await expect(page.locator('#nClock')).toHaveText(`10:24 ${periods[index]}`);
+      const { left, right, midpoint, ordered } = await clock.evaluate((row) => {
+        const { left, right } = row.getBoundingClientRect();
+        const parts = [...row.children].map((part) => part.getBoundingClientRect());
+        return { left, right, midpoint: (parts[0].left + parts.at(-1).right) / 2,
+          ordered: parts.every((part, i) => i === 0 || part.left >= parts[i - 1].right - 1) };
+      });
+      expect(ordered).toBe(true);
+      expect(Math.abs(midpoint - (left + right) / 2)).toBeLessThan(2);
+    }
+
+    const widget = page.locator('.w-clock');
+    await expect(widget.locator('.status .dot.on')).toBeVisible();
+    await expect(widget.locator('.wx-temp')).toHaveText('16°');
+    await expect(widget.locator('.wx-icon svg')).toBeVisible();
+    await expect(widget.locator('.wx-desc')).not.toBeEmpty();
+    await expect(widget.locator('.wx-range')).toContainText('15');
+    for (const width of [1000, 600]) {
+      await page.setViewportSize({ width, height: 420 });
+      await page.evaluate(async () => (await import('/panel/main.js')).emit('state'));
+      await expect(widget.locator('.status .dot.on')).toBeVisible();
+      const centers = await widget.evaluate((box) => {
+        const center = (rect) => (rect.left + rect.right) / 2;
+        const expected = center(box.getBoundingClientRect());
+        return Object.fromEntries(['.status', '.clock', '.wx'].map(selector => {
+          const row = box.querySelector(selector);
+          const children = [...row.children].filter(child => child.getClientRects().length);
+          const rects = children.map(child => child.getBoundingClientRect());
+          const content = { left: Math.min(...rects.map(rect => rect.left)), right: Math.max(...rects.map(rect => rect.right)) };
+          if (selector === '.status') {
+            // The status row clips overflow. Measure the part the browser actually shows.
+            const clip = row.getBoundingClientRect();
+            content.left = Math.max(content.left, clip.left);
+            content.right = Math.min(content.right, clip.right);
+          }
+          return [selector, Math.abs(center(content) - expected)];
+        }));
+      });
+      for (const [row, offset] of Object.entries(centers)) expect(offset, `${row} at viewport ${width}`).toBeLessThan(2);
+      await expect(date).toHaveCSS('text-align', 'center');
+      const bounds = await widget.boundingBox();
+      const media = await page.locator('.w-media').boundingBox();
+      expect(media.x).toBeGreaterThanOrEqual(bounds.x + bounds.width - 1);
+    }
+
+    await expect(date).toHaveCSS('direction', direction);
+    await expect(date).toHaveText(language === 'ar' ? /يناير/ : /January/);
+    await expect(page.locator('#nClock')).toHaveCSS('direction', 'ltr');
+    await expect(page.locator('#nDate')).toHaveCSS('direction', direction);
+  });
+}
+
+for (const [language, direction, period] of [['ar', 'rtl', 'م'], ['en', 'ltr', 'pm']]) {
+  test(`clock start alignment follows the reading direction for old and new settings (${language})`, async ({ page }) => {
+    await page.setViewportSize({ width: 1200, height: 720 });
+    await page.clock.setFixedTime(new Date(2026, 0, 1, 22, 24, 35));
+    await page.route('https://api.open-meteo.com/v1/forecast?*', route => route.fulfill({ json: {
+      current: { weather_code: 0, is_day: 1, temperature_2m: 16, apparent_temperature: 15 },
+      daily: { temperature_2m_max: [19], temperature_2m_min: [11] },
+    } }));
+    await show(page, [undefined, 'left', 'start'].map((align, i) => ({
+      id: `start-${i}`, type: 'clock', x: (i % 2) * 6, y: Math.floor(i / 2) * 4,
+      w: 6, h: 4, options: { providers: [], align },
+    })), { language, hour12: true });
+
+    const widgets = page.locator('.w-clock');
+    await expect(widgets).toHaveCount(3);
+    for (const widget of await widgets.all()) {
+      await expect(widget).not.toHaveClass(/clock-centered/);
+      await expect(widget.locator('.status .dot.on')).toBeVisible();
+      await expect(widget.locator('.wx-temp')).toHaveText('16°');
+      await expect(widget.locator('.clock span')).toHaveText(['10', ':', '24', '35', period]);
+      await expect(widget.locator('.date')).toHaveCSS('direction', direction);
+      await expect(widget.locator('.date')).toHaveCSS('text-align', 'start');
+      const offsets = await widget.evaluate((box, rtl) =>
+        ['.status', '.clock', '.date', '.wx'].map(selector => {
+          const row = box.querySelector(selector);
+          const bounds = row.getBoundingClientRect();
+          const edge = rtl ? 'right' : 'left';
+          const content = selector === '.date'
+            ? (() => { const range = document.createRange(); range.selectNodeContents(row); return range.getBoundingClientRect(); })()
+            : (rtl && selector === '.clock' ? row.lastElementChild : row.firstElementChild).getBoundingClientRect();
+          return Math.abs(content[edge] - bounds[edge]);
+        }), direction === 'rtl');
+      for (const offset of offsets) expect(offset).toBeLessThan(2);
+    }
+  });
+}
+
+test('the clock uses the Japanese day period', async ({ page }) => {
+  await page.clock.setFixedTime(new Date(2026, 0, 1, 22, 24, 35));
+  await show(page, [{ id: 'jp', type: 'clock', x: 0, y: 0, w: 6, h: 4,
+    options: { status: false, weather: false } }], { language: 'ja', hour12: true });
+  await expect(page.locator('.w-clock .ap')).toHaveText('午後');
+});
+
+test('the clock falls back to AM/PM when Intl has no day period', async ({ page }) => {
+  await page.addInitScript(() => {
+    Intl.DateTimeFormat = class extends Intl.DateTimeFormat {
+      formatToParts() { return []; }
+    };
+  });
+  await page.goto('/panel/');
+  const fallback = await page.evaluate(async () => {
+    const { clockPeriod } = await import('/panel/main.js');
+    return [10, 22].map(hour => clockPeriod(new Date(2026, 0, 1, hour)));
+  });
+  expect(fallback).toEqual(['AM', 'PM']);
+});
+
+test('the clock alignment setting reads legacy left as Start and saves Center', async ({ page }) => {
+  await page.goto('/settings/#pages');
+  await page.waitForFunction(() => cfg && cfg.pages);
+  await page.evaluate(() => {
+    const p = curPage();
+    p.widgets.push({ id: 'align-test', type: 'clock', x: 0, y: 0, w: 6, h: 4 });
+    selWidget = p.widgets.length - 1;
+    renderInspector();
+  });
+  const align = page.locator('#inspector .field', { has: page.getByText('Align', { exact: true }) }).locator('select');
+  await expect(align).toHaveValue('start');
+  await expect(align.locator('option')).toHaveText(['Start', 'Center']);
+  await page.evaluate(() => {
+    curPage().widgets[selWidget].options = { align: 'left' };
+    renderInspector();
+  });
+  await expect(align).toHaveValue('start');
+  await expect(align.locator('option')).toHaveCount(2);
+  await align.selectOption('center');
+  await page.locator('#save').click();
+  await expect(page.locator('#save')).toBeDisabled();
+  const saved = await page.evaluate(async () => {
+    const config = await (await fetch('/api/settings')).json();
+    return config.pages.flatMap(p => p.widgets).find(w => w.id === 'align-test')?.options?.align;
+  });
+  expect(saved).toBe('center');
+});
+
+test('the idle media widget uses the Arabic no-audio label', async ({ page }) => {
+  await show(page, [{ id: 'media', type: 'media', x: 0, y: 0, w: 8, h: 4, options: {} }], { language: 'ar' });
+  await expect(page.locator('html')).toHaveAttribute('lang', 'ar');
+  await expect(page.locator('.w-media')).toBeVisible();
+  const label = await page.evaluate(async () => {
+    const main = await import('/panel/main.js');
+    main.D.state = { ...main.D.state, media: null };
+    main.emit('state');
+    return document.querySelector('.w-media .m-title').textContent;
+  });
+  expect(label).toBe('لا يوجد صوت');
+});
+
+test('the Arabic template dialog inserts the saved page title literally', async ({ page }) => {
+  const title = 'Budget $& <2026> "Q4"';
+  await page.addInitScript((title) => {
+    localStorage.setItem('pb-demo-config', JSON.stringify({
+      display: { language: 'ar' },
+      pages: [{ id: 'home', title, widgets: [] }],
+    }));
+  }, title);
+  await page.goto('/settings/#pages');
+  await expect(page.locator('#peHead input[type="text"]').nth(1)).toHaveValue(title);
+  await page.locator('#peHead').getByRole('button', { name: 'استبدال بقالب…' }).click();
+  await expect(page.locator('#modalBody h3')).toHaveText(`استبدال عناصر صفحة «${title}»`);
+});
+
+test('the shortcut delete button is localized in Arabic without changing its English label', async ({ page }) => {
+  await page.goto('/settings/#shortcuts');
+  await page.locator('#deck .key:not(.add)').first().click();
+  const deleteButton = page.locator('#editor button.danger');
+  await expect(deleteButton).toHaveAccessibleName('Delete');
+  const shortcut = page.locator('#deck .key:not(.add) .kl').first();
+  const label = await shortcut.textContent();
+  await page.locator('#langSel').selectOption('ar');
+  await expect(deleteButton).toHaveAccessibleName('حذف');
+  await expect(shortcut).toHaveText(label);
+  await page.evaluate(() => { location.hash = '#webhooks'; });
+  const pushedDelete = page.locator('#whItems button').first();
+  await expect(pushedDelete).toHaveAccessibleName('حذف');
+  await page.locator('#langSel').selectOption('en');
+  await expect(pushedDelete).toHaveAccessibleName('Delete');
+});
+
+for (const language of ['ar', 'de']) {
+  test(`the calendar uses localized Monday-first weekday headings (${language})`, async ({ page }) => {
+    await show(page, [{ id: 'calendar', type: 'calendar', x: 0, y: 0, w: 4, h: 4 }], { language });
+    const headings = await page.evaluate(() => {
+      const formatter = new Intl.DateTimeFormat(window.PhoneBoxI18n.getLocale(), { weekday: 'narrow' });
+      return Array.from({ length: 7 }, (_, i) => formatter.format(new Date(2024, 0, i + 1)));
+    });
+    await expect(page.locator('.w-calendar .cal-h')).toHaveText(headings);
+  });
+}

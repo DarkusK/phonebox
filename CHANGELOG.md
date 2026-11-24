@@ -1,5 +1,210 @@
 # Changelog
 
+## Unreleased
+
+**Widgets**
+- News feeds on Windows: a headline opens the article in the default browser again, not in File Explorer. Links now go
+  to Windows' URL handler instead of explorer.exe, which mistook some links (a long one, or a short one with a query
+  string) for a path (#386, #411, [Exrahn](https://github.com/Exrahn),
+  [dedesoso3366](https://github.com/dedesoso3366)).
+- CPU tile: the CPU's power next to its temperature (`53°C · 4 W`), and CPU power as a choice in the Metric tile,
+  Gauge and Chart. Windows reads it from LibreHardwareMonitor; Linux from RAPL, which most distributions let only
+  root read (#442, #489, [sszxt](https://github.com/sszxt)).
+- AI sessions: the open conversation of a Claude Code session follows new messages while it is read to the end; one
+  scrolled back to an earlier message stays there (#460, [MisteryLiuCode](https://github.com/MisteryLiuCode)).
+- Spotify queue: a track tapped in the widget plays inside the playlist or album that is playing, so the rest of it
+  follows as in the Spotify app. A track you queued by hand still plays on its own (#441,
+  [HugoDeLannoy5311](https://github.com/HugoDeLannoy5311)).
+
+**Agent**
+- Windows: Claude Code and Cursor running inside WSL can show like the native ones. **Also watch Claude Code in WSL**
+  lists the Claude Code sessions of the running distros and uses the Claude sign-in there for the quota when Windows
+  has none; **Also watch Cursor in WSL** lists the chats of projects opened over Remote - WSL. Both are off by default,
+  and a stopped distro is never started (#469, [lucaskaiut](https://github.com/lucaskaiut)).
+- AI quotas: Antigravity shows when `agy` is in `%USERPROFILE%\.gemini\bin` (`~/.gemini/bin` on macOS and Linux)
+  and that folder is not on PATH; the provider silently went missing (#462, [Lyntter](https://github.com/Lyntter)).
+- Restarting, updating or quitting the agent with a phone connected takes about a second instead of 30: the live
+  stream to the phone now ends as soon as the agent begins to stop (#485,
+  [freefakesmile](https://github.com/freefakesmile)).
+- Permission prompts: any request from the phone app now counts as the phone being there, not only a state poll, and
+  a prompt left to the computer says why in `agent.log` (the phone not seen for how long, Ask on the phone off, or
+  the computer in use). Settings no longer offers an agent update to a copy outside the installed folder, which never
+  updates itself (#497, [xxleocoolxx](https://github.com/xxleocoolxx)).
+
+**Panel**
+- Settings › Display › **Sound when a session finishes**, off by default: the panel plays its chime once when AI
+  sessions finish, at a volume of its own, and never on the night screen (#488,
+  [Prajjwal2404](https://github.com/Prajjwal2404)).
+- Arabic: times, values, media controls and technical fields keep their reading order in the right-to-left layout,
+  and a 12-hour clock shows each language's own AM / PM marker. The Clock widget has an **Align** option, Start (as
+  before, on the reading side) or Center (#407, [ahmedalnimr](https://github.com/ahmedalnimr)).
+- A swipe that starts on a key or a card wraps from the last page to the first (and from the first to the last), as
+  it turns any other page; it only did from an empty spot (#487, [nonchita100](https://github.com/nonchita100)).
+- Settings › Display › Page navigation › Hidden takes the page dots off the screen. Swipe or press the volume keys
+  to turn pages, and hold an empty spot for the overview of all pages (#475, [bwh](https://github.com/bwh)).
+- A browser can be a device of its own: `http://127.0.0.1:8765/panel/?device=monitor` shows up under Settings › Phones,
+  so a monitor gets its own pages there, like a phone. Each device can also have its own home page, the page it goes
+  back to when idle (#491, #492, [lucaskaiut](https://github.com/lucaskaiut)).
+- Wallpaper: Settings › Display › Wallpaper puts a picture of your own (JPEG, PNG or WEBP, up to 4 MB) behind every
+  page, darkened (0–90 %) and optionally blurred so the widgets stay readable. The album-art glow is not drawn while
+  a wallpaper is set (#468, #471, [lucaskaiut](https://github.com/lucaskaiut)).
+
+**Android app**
+- The app keeps its connections to the computer open and reuses them, instead of opening a new encrypted connection
+  for every request. On Android 6 each one held system resources until the app was stopped, which may be behind the
+  crashes after some idle time in #389 (#508, [wahackr](https://github.com/wahackr)).
+
+**Setup**
+- macOS: each release also has a disk image, `PhoneBox-<version>-<rid>.dmg`, with PhoneBox.app (no window; the settings
+  are at http://127.0.0.1:8765). It is signed like the zip's agent but not notarized, so macOS asks once in System
+  Settings › Privacy & Security › Open Anyway. The app updates itself from the next release's disk image: the image
+  is checked against the release's checksums and must be signed by the same identity, and the old app is kept until
+  the new one is in place. `scripts/build.sh` builds a .dmg on a Mac or a .tar.gz on Linux from a checkout (#436,
+  #437, [Vasilispapg](https://github.com/Vasilispapg)).
+
+## 0.9.29 — 2026-11-23
+
+A shared mouse (Input Leaf, Deskflow) works in the panel, a sideways swipe on a list turns the page, a large Discord
+widget gets larger buttons and names, and the Windows CPU temperature no longer drops out.
+
+**Widgets**
+- Discord: a large widget has larger mute, deafen and other buttons, member names and avatars, readable and easy to
+  hit on a phone on a stand. Sizes follow the widget's size; at the usual sizes nothing changes (#420,
+  [noswear922](https://github.com/noswear922)).
+
+**Agent**
+- Windows: the CPU temperature from LibreHardwareMonitor no longer drops out on a busy computer. The agent waited
+  only 600 ms for its answer and blanked the temperature for 30 s after each slow one; it now waits 2 s and keeps
+  the last reading through a couple of slow answers (#442, [joaoschlickmann](https://github.com/joaoschlickmann)).
+- macOS: Now playing names YouTube Music installed as a Chrome app, instead of showing the app's 32-letter ID; other
+  Chrome apps show as Chrome (#443, [collorjune-svg](https://github.com/collorjune-svg)).
+
+**Android app**
+- A mouse shared from the computer (Input Leaf with Deskflow or Barrier) can click, drag and long-press in the panel.
+  The main button now acts as a finger, so a drag also swipes between pages; the WebView ignored these mice's
+  clicks before. Plugging in or removing a keyboard (Input Leaf adds one each time the mouse arrives) no longer
+  restarts the panel (#425, [nonchita100](https://github.com/nonchita100)).
+
+**Panel**
+- A sideways swipe that starts on a News feeds, pushed list, Notifications or checklist widget turns the page, as
+  anywhere else on the page; the lists still scroll up and down (#445, [nonchita100](https://github.com/nonchita100)).
+
+## 0.9.28 — 2026-11-23
+
+Faster page switching (tap or slide along the page dots, a page bar with names, a Page buttons widget), Discord
+screen share and a read-only chat, Plex queue and playlists, a Steam library and synced lyrics.
+
+**Widgets**
+- Discord: a button switches Discord between **voice activity** and **push to talk**, keeping your push-to-talk key,
+  delay and sensitivity. When push to talk is on but Discord has no key set (so nobody hears you), the widget says so.
+  It follows the widget's **Control** option like the other buttons and uses the voice scope PhoneBox already asks
+  for (#356, [AlberBM](https://github.com/AlberBM)).
+- Steam library: your installed Steam games with covers, favourites first, then the most recently played, and update
+  progress, read from Steam's own files with no API key, sign-in or network. Starting a game from the phone is a
+  per-widget option, off by default and asking first (#344, #361, [1Cellu](https://github.com/1Cellu)).
+- Synced lyrics: a widget next to Now playing shows the words of the song playing on the computer, the line being
+  sung lit as it plays. The lookup is off by default per widget; with it on, the agent asks LRCLIB (free, no account)
+  with the track's title, artist, album and length, once per song, and keeps the answers in memory only (#339, #378,
+  [1Cellu](https://github.com/1Cellu)).
+- Discord: star servers and voice channels on the phone to keep them at the top, and see who is in your favourite
+  voice channels. The agent reads the starred channels first, then those of favourite servers without starred ones,
+  at most 20 in all, and only while a Discord widget with **Channels** on is on an enabled page (#356, #364,
+  [AlberBM](https://github.com/AlberBM)).
+- Plex queue: a widget shows what a Plex Companion player such as Caldera Amp is playing and what comes next; tap a
+  track to play it. Set it up in **Settings › General › Control Deck › Plex music control** (server address, token
+  and player address, with **Check Plex connection**). Off until a server and a token are entered; the token goes
+  only to your Plex server. The widget's requests are made only while an enabled page shows it; **Check Plex
+  connection** sends one check each time you press it (#379, #409, [snachodog](https://github.com/snachodog)).
+- Plex playlists: a widget starts a Plex playlist on the Plex player with one tap. In the layout editor its options
+  list the playlists on your Plex server to tick, so no playlist id has to be typed; with none ticked it shows every
+  Plex playlist control. A playlist starts only from a Plex playlists widget on an enabled page that shows it. The
+  Plex queue widget is now at least 4 × 4 and the playlists widget 3 × 3, so their text isn't cut off (#379, #414,
+  [snachodog](https://github.com/snachodog)).
+- Discord: start and stop a screen share from the phone. The widget's share view lists the apps with a window on the
+  computer (names only, on Windows; elsewhere use the picker), or opens Discord's own picker there, and stops the
+  share. It has its own setting in **Settings › General › Discord** (**Start and stop Discord screen shares from the
+  phone**), off by default, and needs a Discord widget with **Control** on an enabled page. Discord asks to approve
+  PhoneBox again for the screen-share permission; declining it turns off only screen share (#356, #370,
+  [AlberBM](https://github.com/AlberBM)).
+- Page buttons: a new widget with one button per page (all of them, or the ones you tick), the page you are on
+  highlighted. Put it on the home page to use it as a launcher for the others.
+- Discord: a read-only chat in the widget, for the voice channel you're in or a text channel you pick, with a dot on
+  💬 when someone writes in a channel you opened there. It has its own switch in **Settings › General › Discord**,
+  off by default; Discord asks to approve PhoneBox again for reading messages. Message text stays in the agent's
+  memory and is never logged; **Open in Discord** needs the widget's **Control** (#356, #368, #429,
+  [AlberBM](https://github.com/AlberBM), tested against Discord by
+  [DushyantRajpurohit](https://github.com/DushyantRajpurohit)).
+
+**Agent**
+- Phone app updates: a phone that cannot take a streamed install (`splice failed: EINVAL`, seen with Android 15 on a
+  3.10 kernel) is tried once more without streaming, and a phone whose app was updated another way no longer keeps
+  "Update available" on until the agent restarts (#353, [MU74NTLabs](https://github.com/MU74NTLabs)).
+- Discord: a speaking ring can no longer stay on after someone stops talking when you switch channels; speaking
+  events count only once both of the channel's subscriptions are in place (#354,
+  [M00n-of-saturn](https://github.com/M00n-of-saturn)).
+- Display brightness: the slider keeps the level it was set to. It used to jump back to the old level for up to
+  30 s, until the agent read the monitor again (#360, [andrii-pavlykivskyi](https://github.com/andrii-pavlykivskyi)).
+- macOS: the CPU and RAM process lists show kernel_task and system processes such as WindowServer, locked against
+  ending them like other protected processes. kernel_task's memory is the system's wired memory, an estimate rather
+  than its own measurement (#388, [ajaybali9](https://github.com/ajaybali9)).
+- Discord: when Discord refuses the login with `Missing "redirect_uri"`, the message says where to add the redirect
+  (`http://127.0.0.1` under **OAuth2 › Redirects** in the Discord application) and that the switch needs **Save** off
+  and on again (#316, #380, [DushyantRajpurohit](https://github.com/DushyantRajpurohit)).
+- Quotas: a CodexBar poll that fails for a moment (Cursor's session can't be read from the background on macOS) no
+  longer blanks the Cursor ring; the last good reading stays for up to 6 hours, without limits that have reset since,
+  and a refresh polls CodexBar again at once (#398, [ajaybali9](https://github.com/ajaybali9)).
+- Linux: the cover art of music playing in Chrome, Brave, Edge or Chromium shows on the phone. These browsers save it
+  to a temporary file with no image extension, which the agent refused (#427, #428,
+  [sanjai4334](https://github.com/sanjai4334)).
+
+**Android app**
+- A request to the agent that fails (a timeout, a dropped cable) now closes its connection at once instead of
+  leaving it for the garbage collector. On Android 6 each one also held two pipes until then, and the system's TLS
+  code stops the app once 1024 are open; this may be behind the crashes in #389
+  ([d3j4n](https://github.com/d3j4n)).
+- A phone whose system can't start the Android System WebView (seen on an OPPO with ColorOS 3.0 on Android 5.1) now
+  shows a message saying so instead of crashing at every launch (#385, [w364439](https://github.com/w364439)).
+
+**Panel**
+- The Spectrum bars and App console widgets stop asking the PC while nobody can see the panel (screen off, another
+  app in front): the spectrum no longer keeps the PC capturing its sound, polling every 40 ms once the live stream was
+  closed, and the console no longer asks which app is in front.
+- Night screen while the computer is unreachable: an option on the phone, off by default, dims to the night screen
+  after the agent has answered on no route, USB or Wi-Fi, for a set time (1 to 30 minutes, 5 by default; for
+  example the computer is off or asleep). It ends when the agent answers again, unless the scheduled night screen is
+  on anyway. The **Wake the PC** button stays reachable over it (#347, #357,
+  [CrippledHelix](https://github.com/CrippledHelix)).
+- Translations: about 110 machine-translated labels that said something else entirely are corrected in 20 languages.
+  For example, the Turkish rule template "🌅 Workday mornings → daily page" named a volleyball player, "Box 4-4-4-4"
+  breathing read 4-4-4-3 in most languages, and Russian "🔇 Mute" said "Lock".
+- Translations: the Power controls, Push to talk, virtual desktop, Lock and Display off buttons, the panic button, the
+  trackpad hint, the Stop buttons, the Sun & moon, Moon and Battery care titles and the GPU chips were English in every
+  language; they are translated now, and in Portuguese (Brazil) also the moon phases and the Control Deck states (#415,
+  [rsiqueira01](https://github.com/rsiqueira01)).
+- Page dots: a tap on a dot goes straight to its page, and sliding a finger along the dots names the page under it
+  at the top and opens it when you let go. The current dot, or the new grid button next to the dots, opens the
+  overview of all pages; holding the dots still pauses page switching.
+- Page bar: **Settings › General › Display › Page navigation** can show the page dots as a bar of buttons with each
+  page's icon and name, at the bottom or down the left or right edge. **Page bar when you touch the dots** opens it
+  over the page and closes it again after a few seconds; **Page bar, always shown** gives it its own strip of the
+  screen. The dots stay the default.
+
+**Tools**
+- `tools/demo-server.py` refuses a chunked request body (411) and closes the connection, instead of answering without
+  the body and reading it as the next request.
+- The UI tests' web server accepts many connections at once, so the suite no longer fails with refused connections
+  when it runs with several workers on Windows (#405, [DushyantRajpurohit](https://github.com/DushyantRajpurohit)).
+
+**Languages**
+- The weather line no longer shows stray English ("weather condition", "weather forecast") after the condition, and
+  the weather conditions read right in Arabic, Czech, Hindi, Indonesian, Japanese, Korean, Thai, Traditional Chinese
+  and Ukrainian ("Clear" no longer reads as "Delete", "Showers" as a bathroom shower). A few other broken strings in
+  Hindi, Japanese, Korean, Russian, Thai and Ukrainian are fixed, and the release check now catches English left-overs,
+  raw bytes and empty translations (#358, [Yura-Kondratiuk](https://github.com/Yura-Kondratiuk)).
+- Arabic: a native speaker went over the whole translation, and the calendar's weekday headings now follow the
+  panel's language in every language instead of always being English (#376,
+  [ahmedalnimr](https://github.com/ahmedalnimr)).
+
 ## 0.9.27 — 2026-11-21
 
 The Discord login works again, nine new languages (23 in all, Arabic right to left), Discord shows who is speaking,

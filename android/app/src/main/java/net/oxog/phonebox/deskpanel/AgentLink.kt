@@ -242,7 +242,7 @@ class AgentLink(private val context: Context) {
         val f = usbFactory?.takeIf { it.first == pin }?.second ?: pinnedFactory(pin).also { usbFactory = pin to it }
         return (URL("$USB_BASE$pathAndQuery").openConnection() as HttpsURLConnection).apply {
             sslSocketFactory = f
-            hostnameVerifier = javax.net.ssl.HostnameVerifier { _, _ -> true } // identity is the pinned certificate
+            hostnameVerifier = PINNED_HOSTNAME_VERIFIER // identity is the pinned certificate
             setRequestProperty("Authorization", "Bearer ${UsbKey.get(context)}")
         }
     }
@@ -267,7 +267,7 @@ class AgentLink(private val context: Context) {
             try {
                 val c = URL("https://${hosts[i]}:$port$pathAndQuery").openConnection() as HttpsURLConnection
                 c.sslSocketFactory = f
-                c.hostnameVerifier = javax.net.ssl.HostnameVerifier { _, _ -> true } // identity is the pinned certificate
+                c.hostnameVerifier = PINNED_HOSTNAME_VERIFIER // identity is the pinned certificate
                 c.connectTimeout = 1500
                 c.setRequestProperty("Authorization", "Bearer $token")
                 val r = send(c, method, readTimeout, body, contentType)
@@ -283,7 +283,16 @@ class AgentLink(private val context: Context) {
     private fun send(c: HttpURLConnection, method: String, readTimeout: Int = 4000): Reply =
         send(c, method, readTimeout, null, null)
 
-    private fun send(c: HttpURLConnection, method: String, readTimeout: Int, body: ByteArray?, contentType: String?): Reply {
+    private fun send(c: HttpURLConnection, method: String, readTimeout: Int, body: ByteArray?, contentType: String?): Reply = try {
+        exchange(c, method, readTimeout, body, contentType)
+    } catch (e: Exception) {
+        // A failed request frees its socket now instead of when the garbage collector gets to it: on Android 6 each
+        // TLS socket also holds two pipe descriptors, and the system's TLS code aborts the app once 1024 are open (#389).
+        c.disconnect()
+        throw e
+    }
+
+    private fun exchange(c: HttpURLConnection, method: String, readTimeout: Int, body: ByteArray?, contentType: String?): Reply {
         // every POST acts on the computer (a container restart, a Home Assistant switch, a macro): none may run twice
         val controlPost = method == "POST"
         c.instanceFollowRedirects = false
@@ -582,7 +591,7 @@ class AgentLink(private val context: Context) {
                 val c = URL("https://$host:${link.port}/api/pair/claim").openConnection() as HttpsURLConnection
                 c.instanceFollowRedirects = false
                 c.sslSocketFactory = pinned
-                c.hostnameVerifier = javax.net.ssl.HostnameVerifier { _, _ -> true } // identity is the pinned certificate
+                c.hostnameVerifier = PINNED_HOSTNAME_VERIFIER // identity is the pinned certificate
                 c.connectTimeout = 3000
                 c.readTimeout = 8000
                 c.requestMethod = "POST"
@@ -634,6 +643,11 @@ class AgentLink(private val context: Context) {
     }
 
     companion object {
+        // Android pools HTTPS connections by the hostname verifier as well as the socket factory: a new lambda per
+        // request means no reuse, and on Android 6 each new TLS connection costs descriptors until the app is killed
+        // (#389, #508). Only for the pinned factories: the pinned certificate, not the host name, is the identity.
+        private val PINNED_HOSTNAME_VERIFIER = javax.net.ssl.HostnameVerifier { _, _ -> true }
+
         private const val USB_BASE = "https://127.0.0.1:8765"
         /** The agent sends "state" every second, so a silent connection for this long is dead. */
         private const val STREAM_READ_TIMEOUT = 8000

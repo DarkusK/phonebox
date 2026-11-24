@@ -76,12 +76,12 @@ curl -fsSL https://raw.githubusercontent.com/ersinkoc/phonebox/main/setup.sh | b
 
 <details><summary><b>Before you run it: warnings</b></summary>
 
-- **The Windows agent is not code-signed yet.** The [SignPath Foundation](../README.md#code-signing-policy) application is pending.
+- **The Windows agent is not code-signed yet.** [SignPath Foundation](../README.md#code-signing-policy) accepted the project; releases are signed once its release certificate is issued.
   Windows SmartScreen or an antivirus may warn about a new, unsigned program, and some antivirus engines have flagged
   it ([#69](https://github.com/ersinkoc/phonebox/issues/69)). Setup only installs a file that matches the release
   checksum. If your antivirus removes `PhoneBoxAgent.exe`, setup says so; restore it from quarantine or report it.
 - **Smart App Control** (Windows 11) blocks programs that are neither signed nor known to Microsoft. The agent is
-  not code-signed yet (signing through SignPath Foundation is pending, [#56](https://github.com/ersinkoc/phonebox/issues/56)),
+  not code-signed yet (signing through SignPath Foundation waits for its release certificate, [#56](https://github.com/ersinkoc/phonebox/issues/56)),
   so with Smart App Control on, Windows refuses to start it: "An Application Control policy has blocked this file"
   ([#69](https://github.com/ersinkoc/phonebox/issues/69)). Setup warns you first, still installs it, and explains
   if Windows blocks it. Please keep Smart App Control on: on older Windows builds it cannot be turned back on without
@@ -132,7 +132,13 @@ The settings are at <http://127.0.0.1:8765>, on Windows also from the tray icon.
 
 - **Manual download**: the [release](https://github.com/ersinkoc/phonebox/releases/latest) has the signed Android
   APK and agents for Windows x64, Linux x64/ARM64 and macOS Apple silicon/Intel, with SHA-256 checksums and build
-  provenance. Unzip the agent and run it. It can update itself only from the install folder in the table above.
+  provenance. Unzip the agent and run it. It can update itself only from the install folder in the table above. On a Mac,
+  the `.dmg` holds `PhoneBox.app`: drag it to Applications (or `~/Applications`) and open it. It has no window; the settings
+  are at http://127.0.0.1:8765. If you installed with `setup.sh`, that agent is already running and holds the port, so first quit it
+  and run `launchctl unload ~/Library/LaunchAgents/net.oxog.phonebox.agent.plist` (otherwise opening the app only reopens its settings,
+  and the login job starts the old agent again). It is not notarized, so macOS blocks it the first time: open it once, then allow it in *System Settings › Privacy &
+  Security › Open Anyway* (right-click › Open works only up to macOS 14). The Accessibility permission is recorded per
+  app, so allow PhoneBox there once more when you move between this app and an agent started from the zip or `setup.sh`.
 - **Scoop** (Windows), which can then put the app on the phone from *Settings › General › Install the phone app*:
 
   ```powershell
@@ -192,8 +198,9 @@ deletes the settings, and `-Apk` / `--apk` removes the app from the connected ph
 |---|---|---|---|
 | CPU, RAM, network, disks, ping | ✓ | ✓ | ✓ |
 | CPU temperature | LibreHardwareMonitor | ✓ (hwmon) | — |
+| CPU power | LibreHardwareMonitor | RAPL, where the agent may read it (most distributions allow only root) | — |
 | GPU load, VRAM, temperature | Any vendor (Windows GPU counters); NVIDIA adds power, fan and clocks (`nvidia-smi`), AMD / Intel add them with LibreHardwareMonitor | NVIDIA (`nvidia-smi`), AMD (`amdgpu` sysfs), Intel (`i915` / `xe`: load and clock) | Apple silicon (`ioreg`) |
-| Now playing + controls | ✓ (any app) | ✓ (MPRIS via `playerctl`) | System media, including browser video, with `nowplaying-cli`; Spotify and Music fallback |
+| Now playing + controls | ✓ (apps in Windows' media controls) | ✓ (MPRIS via `playerctl`) | System media, including browser video, with `nowplaying-cli`; Spotify and Music fallback |
 | Volume | ✓ | ✓ (`wpctl` / `pactl`) | ✓ |
 | Processes, end one / all | ✓ | ✓ (your own) | ✓ (your own) |
 | App icons | ✓ | ✓ (icon theme) | ✓ (app bundles) |
@@ -202,6 +209,8 @@ deletes the settings, and `-Apk` / `--apk` removes the app from the connected ph
 | Claude / Codex quotas & sessions, GitHub, webhooks | ✓ | ✓ | ✓ (Claude token from the Keychain) |
 | Tray icon | ✓ | — (settings in the browser) | — |
 | Start at login | Startup folder | systemd user service | launchd agent |
+
+On Windows, Now playing shows the apps that appear in Windows' own media controls (the panel above the volume in Quick Settings): Spotify, browsers, Media Player and most streaming apps. A player that does not report itself there, such as VLC 3, stays blank on the phone. While no other app is in those controls, play / pause sends the keyboard's media key, which such a player may act on (VLC does when its media keys are global hotkeys or it is in front), but the phone cannot tell whether it plays.
 
 On macOS, `nowplaying-cli` supplies system media metadata and cover art. The agent labels matching Safari or Chrome tabs as YouTube or YouTube Music. The progress bar advances from the last position supplied by macOS; Safari may report an outdated starting position. Volume follows the selected system output. When macOS does not expose its volume, an optional `m1ddc` installation can read it from a compatible display; display volume is read only in PhoneBox. Unsupported outputs show `n/a`. Apple silicon GPU usage comes from IORegistry when macOS exposes it; temperature, power and VRAM figures may remain unavailable.
 
@@ -225,7 +234,8 @@ is nothing to turn on in PhoneBox.
    sensors need it).
 2. In its menu choose **Options › Remote Web Server › Run**. The port stays **8085** (PhoneBox only looks there).
 3. Check it in a browser on the PC: <http://127.0.0.1:8085/data.json> should show a long JSON text. Within a few
-   seconds the CPU temperature and the extra GPU values appear on the phone.
+   seconds the CPU temperature, the CPU power (when your CPU reports a package power there) and the extra GPU values
+   appear on the phone.
 4. To keep it running: **Options › Start Minimized**, **Minimize To Tray** and **Run On Windows Startup**.
 
 The web server answers on every network the PC is on. If Windows Firewall asks, PhoneBox only needs it on this
@@ -273,6 +283,9 @@ phone; over Wi-Fi the panel shows "plug in USB to update") and replaces its own 
 accepts an update signed with the same key as the installed app; the agent never uninstalls to force one.
 When GitHub turns away anonymous requests (it answers 503 / 504 now and then), the agent asks again with the
 [GitHub CLI](https://cli.github.com)'s token if `gh` is signed in; the token only goes to `api.github.com`.
+A Mac agent running from `PhoneBox.app` (the `.dmg` of a release) updates the same way, by replacing the whole app: it
+downloads the release's `PhoneBox-<version>-<rid>.dmg`, checks it against the release checksums and the new app's signature, swaps it
+in and restarts. The app must sit in a folder you can write to, such as `~/Applications`.
 See the [changelog](../CHANGELOG.md).
 
 ## FAQ & troubleshooting
@@ -290,6 +303,12 @@ QR code or over USB, and allow the agent through the firewall for your private n
 The panel carries on over Wi-Fi when Wi-Fi is on, and **Settings › General › Phone connection** says what the phone
 itself sees: if it is charging but has no USB data connection, the cable or the port only carries power — try another
 cable, or a port straight on the computer instead of a hub or a front-panel port. Updates of the phone app need USB.
+
+On some Samsung phones the USB data link restarts each time charging stops, starts or changes speed, and adb sees
+the phone go away for a few seconds. **Protect battery** (charging stops at 85 % and starts again below it) does
+this every few minutes, and fast charging can too. Turning Protect battery off made the drops rare on a Galaxy A31
+(Android 11), but not gone ([#410](https://github.com/ersinkoc/phonebox/issues/410)); there, Wi-Fi with the phone on
+a charger of its own works without drops.
 </details>
 
 <details><summary><b>Some widgets show "—" or "No data".</b></summary>

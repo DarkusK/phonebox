@@ -16,6 +16,8 @@ import './widgets/console.js';
 import './widgets/dictate.js';
 import './widgets/camera.js';
 import './widgets/spectrum.js';
+import './widgets/steam-library.js';
+import './widgets/lyrics.js';
 
 // PhoneBox desk panel. Pages are 12 × 6 grids of widgets, designed in the agent's settings page.
 // The panel talks to the PhoneBox agent through "/agent/*", which the Android shell proxies over USB
@@ -25,7 +27,13 @@ export const API = '/agent/api';
 // The phone's native proxy only forwards requests that carry this header (or image GETs), so script in a sandboxed
 // Custom HTML widget cannot reach the agent: adding the header to a cross-origin request needs a CORS preflight,
 // which the proxy refuses. See MainActivity.fromPanel.
-export const PANEL_HEADERS = { 'X-PhoneBox-Panel': '1' };
+// A panel in a browser can stand for a device of its own (/panel/?device=monitor): the agent then gives it that device's
+// pages and home page from Settings › Phones, as it does for each phone (the app sends its id itself). Same rule as the
+// agent's for device ids: letters and digits, up to 32.
+const DEVICE = (() => {
+  try { const d = new URLSearchParams(location.search).get('device') || ''; return /^[A-Za-z0-9]{1,32}$/.test(d) ? d : ''; } catch (_) { return ''; }
+})();
+export const PANEL_HEADERS = { 'X-PhoneBox-Panel': '1', ...(DEVICE ? { 'X-PhoneBox-Device': DEVICE, 'X-PhoneBox-Model': 'Browser' } : {}) };
 export const I18n = window.PhoneBoxI18n;
 export const t = (key, vars) => (I18n ? I18n.t(key, vars) : key);
 /** A panel literal translated by its English text (i18n.js PANEL); English when the language has no entry. */
@@ -74,7 +82,7 @@ export const FALLBACK_PAGES = [{
 export const DEFAULT_CFG = {
   weather: { city: 'Tallinn', lat: 59.437, lon: 24.745, unit: 'celsius', model: '' },
   night: { enabled: true, start: '00:30', end: '07:30', brightness: 0.02 },
-  display: { showSeconds: true, idleReturnSec: 90, vibrate: true, finishToast: true, volumeKeys: true },
+  display: { showSeconds: true, idleReturnSec: 90, vibrate: true, finishToast: true, finishSound: false, finishSoundVolume: 70, volumeKeys: true, nightWhenUnreachable: false, unreachableNightDelayMin: 5, pageBar: 'dots', pageBarSide: 'bottom' },
   opencode: { alwaysCountdownSec: 10 },
   pages: FALLBACK_PAGES,
   shortcuts: [],
@@ -124,7 +132,7 @@ export let pushVersion = null;
 export const D = { state: null, quotas: null, work: null, procs: null, push: {}, weather: null, calendar: null, notes: store.get('notes', []) };
 
 export const HIST = 90;
-export const hist = { cpu: [], gpu: [], ram: [], vram: [], down: [], up: [], ping: [], gputemp: [], cputemp: [], hotspot: [], gpupower: [], gpuclock: [] };
+export const hist = { cpu: [], gpu: [], ram: [], vram: [], down: [], up: [], ping: [], gputemp: [], cputemp: [], hotspot: [], gpupower: [], gpuclock: [], cpupower: [] };
 export const pushHist = (k, v) => { const a = hist[k]; a.push(v ?? 0); if (a.length > HIST) a.shift(); };
 
 // ---------------------------------------------------------------- helpers
@@ -432,7 +440,21 @@ export function hour12() {
   }
   return false;
 }
-export const fmtClock = (H, M) => (hour12() ? `${H % 12 || 12}:${pad(M)} ${H < 12 ? 'AM' : 'PM'}` : `${pad(H)}:${pad(M)}`);
+let clockPeriodLocale, clockPeriodFormatter;
+export function clockPeriod(date) {
+  const fallback = date.getHours() < 12 ? 'AM' : 'PM';
+  try {
+    if (clockPeriodLocale !== LOCALE) {
+      clockPeriodFormatter = new Intl.DateTimeFormat(LOCALE, { hour: 'numeric', hour12: true });
+      clockPeriodLocale = LOCALE;
+    }
+    return clockPeriodFormatter.formatToParts(date).find(part => part.type === 'dayPeriod')?.value || fallback;
+  } catch (_) {
+    return fallback;
+  }
+}
+export const fmtClock = (H, M, period = H < 12 ? 'AM' : 'PM') => (hour12() ? `${H % 12 || 12}:${pad(M)} ${period}` : `${pad(H)}:${pad(M)}`);
+const fmtNightClock = (d) => fmtClock(d.getHours(), d.getMinutes(), clockPeriod(d));
 export const fmtHM = (d) => fmtClock(d.getHours(), d.getMinutes());
 export const fmtTime = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return Math.floor(s / 60) + ':' + pad(s % 60); };
 export function fmtRate(bps) {
@@ -557,7 +579,10 @@ export const netMax = () => Math.max(1, ...hist.down, ...hist.up) * 1.15;
 
 export const METRICS = {
   cpu: { label: 'CPU', name: 'Processor', color: '--cpu', unit: '%', max: () => 100, val: (s) => s.pc?.cpu,
-    sub: (s) => (s.pc?.cpuTemp != null ? `${Math.round(s.pc.cpuTemp)}°C` : shortCpu(s.pc?.cpuName)), title: (s) => s.pc?.cpuName },
+    sub: (s) => {
+      const parts = [s.pc?.cpuTemp != null ? `${Math.round(s.pc.cpuTemp)}°C` : null, s.pc?.cpuPower != null ? `${Math.round(s.pc.cpuPower)} W` : null].filter(Boolean);
+      return parts.length ? parts.join(' · ') : shortCpu(s.pc?.cpuName);
+    }, title: (s) => s.pc?.cpuName },
   gpu: { label: 'GPU', name: 'Graphics', color: '--gpu', unit: '%', max: () => 100, val: (s) => gpuOf(s)?.util,
     sub: (s) => {
       const g = gpuOf(s);
@@ -607,6 +632,8 @@ export const METRICS = {
     sub: (s) => { const g = gpuOf(s); return g?.memClock != null ? tpv('Memory {n} MHz', { n: Math.round(g.memClock) }) : g?.clock == null ? tp('No clock data') : ''; } },
   cputemp: { label: 'CPU TEMP', name: 'CPU temperature', color: '#fb7185', unit: '°C', max: () => 100, hot: [75, 85], val: (s) => s.pc?.cpuTemp,
     sub: (s) => (s.pc?.cpuTemp == null ? tp('needs LibreHardwareMonitor') : shortCpu(s.pc?.cpuName)) },
+  cpupower: { label: 'CPU POWER', name: 'CPU power', color: '#a3e635', unit: 'W', max: () => Math.max(...hist.cpupower, 50), val: (s) => s.pc?.cpuPower,
+    sub: (s) => (s.pc?.cpuPower != null ? shortCpu(s.pc?.cpuName) : s.os === 'windows' ? tp('needs LibreHardwareMonitor') : tp('No power data')) },
 };
 
 export function metricText(m, s) {
@@ -688,11 +715,17 @@ export function wxLines() {
   const desc = wxText(c.weather_code);
   const hi = d.temperature_2m_max ? wxDeg(d.temperature_2m_max[0]) : null;
   const lo = d.temperature_2m_min ? wxDeg(d.temperature_2m_min[0]) : null;
+  // Isolate signed temperatures and arrows without changing the Arabic description.
+  const rtl = document.documentElement.dir === 'rtl';
+  const isolate = (value) => rtl ? '\u2066' + value + '\u2069' : value;
+  const apparent = wxDeg(c.apparent_temperature);
+  const feelsLike = t('wx.feelsLike', { deg: apparent })
+    .replace(`\u2068${apparent}\u2069°`, () => isolate(apparent + '°'));
   return {
     icon: wxIcon(c.weather_code, c.is_day),
     temp: wxDeg(c.temperature_2m) + '°',
     desc: `${desc} · ${cfg.weather?.city || ''}`,
-    range: (hi != null ? `↑${hi}° ↓${lo}° · ` : '') + t('wx.feelsLike', { deg: wxDeg(c.apparent_temperature) }),
+    range: (hi != null ? isolate(`↑${hi}° ↓${lo}°`) + ' · ' : '') + feelsLike,
   };
 }
 
@@ -963,6 +996,7 @@ export let workLoaded = false;
 
 /** Vibrates and shows a toast when a session finishes or starts waiting for input; the finish toast can be turned off. */
 export function notifyTransitions(sessions) {
+  let finished = 0;
   for (const s of sessions) {
     const before = prevStatus.get(s.id);
     if (workLoaded && before && before !== s.status) {
@@ -972,10 +1006,12 @@ export function notifyTransitions(sessions) {
       } else if (s.status === 'idle' && (before === 'busy' || before === 'shell')) {
         buzz('0,70,110,70');
         if (cfg.display?.finishToast !== false) toast(t('panel.sessionFinished', { name: s.name }), 'ok');
+        finished++;
       }
     }
     prevStatus.set(s.id, s.status);
   }
+  if (finished > 0 && cfg.display?.finishSound) chime(cfg.display.finishSoundVolume ?? 70, true);
   workLoaded = true;
 }
 
@@ -1411,10 +1447,10 @@ export function handleEvent(e) {
   else if (e.kind === 'reload') location.reload();
 }
 
-export const WIDGET_ICONS = { camera: '📹', dictate: '🎙️', spectrum: '📶', 'app-console': '🎛️', discord: '💬', 'discord-bar': '🔊', ytmusic: '🎵', steam: '👥', 'steam-activity': '🔔', rules: '⚡', chargecare: '🔋', nextup: '⏭️', moon: '🌙', wordclock: '🔤', clock: '🕒', weather: '⛅', forecast: '🌦️', media: '🎵', stat: '📈', gauge: '⏲️', chart: '📊', meters: '💾', gpu: '🎮', quotas: '✳️', sessions: '🤖',
+export const WIDGET_ICONS = { camera: '📹', dictate: '🎙️', spectrum: '📶', 'app-console': '🎛️', discord: '💬', 'discord-bar': '🔊', ytmusic: '🎵', steam: '👥', 'steam-activity': '🔔', rules: '⚡', chargecare: '🔋', nextup: '⏭️', moon: '🌙', wordclock: '🔤', clock: '🕒', weather: '⛅', forecast: '🌦️', media: '🎵', lyrics: '🎤', stat: '📈', gauge: '⏲️', chart: '📊', meters: '💾', gpu: '🎮', quotas: '✳️', sessions: '🤖',
   github: '🐙', processes: '⚙️', shortcuts: '🎛️', button: '🔘', worldclock: '🌍', calendar: '📅', pomodoro: '🍅', countdown: '⏳', note: '📝', command: '💻',
   push: '📡', inbox: '📬', label: '🔤', analog: '🕰️', progress: '📆', stopwatch: '⏱️', timer: '⏲️', counter: '🔢', breathe: '🫁', quote: '💬',
-  checklist: '✅', battery: '🔋', topprocs: '🔥', quotaring: '🎯', volume: '🔊', sun: '🌅', air: '🍃', hackernews: '📰', feeds: '🗞️', photos: '🖼️', exchange: '💱', crypto: '🪙', image: '🖼️', pcswitch: '🖥️' };
+  checklist: '✅', battery: '🔋', topprocs: '🔥', quotaring: '🎯', volume: '🔊', sun: '🌅', air: '🍃', hackernews: '📰', feeds: '🗞️', photos: '🖼️', exchange: '💱', crypto: '🪙', image: '🖼️', pcswitch: '🖥️', pagebuttons: '🧭', 'plex-queue': '🎛️', 'plex-playlists': '🎶' };
 
 // ================================================================= pages
 export const pager = $('pager');
@@ -1544,6 +1580,8 @@ export function setActive(all = false) {
 export let pagePaused = false;
 let pausedPageId = null;
 let pagePauseBtn = null;
+let pageAllBtn = null;
+let scrubFrom = null, scrubbed = false; // { x, id, at }: a press on the dots that may turn into a slide along them
 let pageOverlayTimer = 0;
 
 /** Builds an inline SVG element for the page pause toggle and center overlay. */
@@ -1616,7 +1654,7 @@ export function togglePagePaused() {
 export function buildDots() {
   const dots = $('dots');
   if (pages.length < 2) {
-    pagePauseBtn = null;
+    pagePauseBtn = pageAllBtn = null;
     dots.replaceChildren();
     dots.classList.remove('paused');
     dots.hidden = true;
@@ -1629,9 +1667,28 @@ export function buildDots() {
   pagePauseBtn.type = 'button';
   pagePauseBtn.addEventListener('click', (e) => {
     e.stopPropagation();
+    if (scrubbed) { scrubbed = false; return; } // the touch that opened the page bar
     togglePagePaused();
   });
-  dots.replaceChildren(...pages.map(() => h('i')), pagePauseBtn);
+  // each dot is a finger-sized button that goes to its page; the dot itself stays the small <i> inside
+  const dot = (p, i) => {
+    const b = h('button', 'dot', h('i'), p.icon ? h('span', 'dot-ic', rich(p.icon)) : null, h('span', 'dot-nm', p.title || `${i + 1}`));
+    b.type = 'button';
+    b.dataset.i = i;
+    b.setAttribute('aria-label', `${i + 1} · ${`${p.icon || ''} ${p.title || ''}`.trim()}`);
+    return b;
+  };
+  pageAllBtn = h('button', 'page-all', makeSvg('i-all', 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z'));
+  pageAllBtn.type = 'button';
+  pageAllBtn.title = t('panel.allPages');
+  pageAllBtn.setAttribute('aria-label', t('panel.allPages'));
+  pageAllBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (scrubbed) { scrubbed = false; return; } // the touch that opened the page bar
+    openOverview();
+  });
+  dots.style.setProperty('--n', pages.length);
+  dots.replaceChildren(...pages.map(dot), pageAllBtn, pagePauseBtn);
   dots.hidden = false;
   syncPagePauseUi();
   buildNavbar();
@@ -1639,6 +1696,7 @@ export function buildDots() {
 
 export function updateDots() {
   $('dots').querySelectorAll('i').forEach((d, i) => d.classList.toggle('on', i === curPage));
+  $('dots').querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('on', i === curPage));
   updateNavbar();
 }
 
@@ -1728,13 +1786,15 @@ function updateNavStatus() {
 }
 
 export let snapTimer = 0;
+/** The width of one page: the pager's, which a docked side page bar makes narrower than the window. */
+const pageWidth = () => pager.clientWidth || window.innerWidth;
 export function goPage(i, instant = false) {
   i = Math.max(0, Math.min(pages.length - 1, i));
   if (curPage >= 0 && i !== curPage && pagePaused) setPagePaused(false, { feedback: false, resume: false });
-  if (!instant) { pager.scrollTo({ left: i * window.innerWidth, behavior: 'smooth' }); return; }
+  if (!instant) { pager.scrollTo({ left: i * pageWidth(), behavior: 'smooth' }); return; }
   // scroll-snap-stop: always would stop a programmatic jump at the next page, so snapping is paused for the jump.
   pager.style.scrollSnapType = 'none';
-  pager.scrollLeft = i * window.innerWidth;
+  pager.scrollLeft = i * pageWidth();
   onScroll();
   clearTimeout(snapTimer);
   snapTimer = setTimeout(() => (pager.style.scrollSnapType = ''), 120);
@@ -1778,7 +1838,8 @@ export const resolvePage = (ref) => {
   const n = typeof ref === 'number' ? ref - 1 : /^\d+$/.test(String(ref)) ? +ref - 1 : pages.findIndex((p) => p.id === ref || p.title.toLowerCase() === String(ref).toLowerCase());
   return n >= 0 && n < pages.length ? n : -1;
 };
-export const homeIndex = () => { const id = cfg.display?.homePage; const i = id ? pages.findIndex((p) => p.id === id) : -1; return i >= 0 ? i : 0; };
+// this device's own home page (Settings › Phones) comes before the global one
+export const homeIndex = () => { const id = cfg.homePage || cfg.display?.homePage; const i = id ? pages.findIndex((p) => p.id === id) : -1; return i >= 0 ? i : 0; };
 
 // ================================================================= calm page switching
 // Rules, webhooks and the idle return ask for a page instead of jumping to it. A request waits while you are using the
@@ -1991,18 +2052,23 @@ export function renderRulesBtn() {
 }
 
 export let titleTimer = 0;
-export function flashTitle() {
-  const p = pages[curPage];
-  if (!p || pages.length < 2) return;
-  const t = $('ptitle');
-  t.replaceChildren(rich(`${p.icon || ''} ${p.title}`.trim()));
-  t.classList.add('on');
+/** Shows page i's number, icon and title at the top: until hidden (hold) or for 900 ms. -1 hides it. */
+function showPageName(i, hold = false) {
+  const el = $('ptitle');
   clearTimeout(titleTimer);
-  titleTimer = setTimeout(() => t.classList.remove('on'), 900);
+  const p = pages[i];
+  if (!p || pages.length < 2) { el.classList.remove('on'); return; }
+  el.replaceChildren(rich(`${p.icon || ''} ${p.title}`.trim()));
+  el.classList.add('on');
+  if (!hold) titleTimer = setTimeout(() => el.classList.remove('on'), 900);
+}
+export function flashTitle() {
+  if (scrubFrom?.at != null) return; // the slide along the dots names the page under the finger
+  showPageName(curPage);
 }
 
 export function onScroll() {
-  const p = Math.round(pager.scrollLeft / window.innerWidth);
+  const p = Math.round(pager.scrollLeft / pageWidth());
   if (p === curPage) return;
   const prev = curPage;
   curPage = p;
@@ -2057,6 +2123,66 @@ $('overview').addEventListener('click', closeOverview);
 $('ovRules').addEventListener('click', (e) => { e.stopPropagation(); toggleRulesPause(); });
 
 let dotsHoldTimer = 0, dotsHoldStart = null, heldDots = false;
+// ---- the page bar: the dots shown as buttons with each page's icon and name (Settings › Display › Page navigation)
+/** dots (default), auto (a bar while the dots are being used), bar (always, with its own space) or hidden (none). */
+export const pageBarMode = () => (['auto', 'bar', 'hidden'].includes(cfg.display?.pageBar) ? cfg.display.pageBar : 'dots');
+const pageBarSide = () => (['left', 'right'].includes(cfg.display?.pageBarSide) ? cfg.display.pageBarSide : 'bottom');
+let pageBarKey = '', pageBarTimer = 0, pageBarOpen = false;
+/** In "auto" mode, opens the bar and closes it again 5 s after the last touch on it. */
+function showPageBar() {
+  pageBarOpen = true;
+  applyPageBar();
+  clearTimeout(pageBarTimer);
+  const close = () => {
+    if (scrubFrom) { pageBarTimer = setTimeout(close, 1000); return; } // not while a finger slides along it
+    pageBarOpen = false;
+    applyPageBar();
+  };
+  pageBarTimer = setTimeout(close, 5000);
+}
+export function applyPageBar() {
+  const mode = pageBarMode(), side = pageBarSide();
+  const docked = mode === 'bar' && pages.length > 1;
+  const shown = docked || (mode === 'auto' && pageBarOpen);
+  const key = `${mode}|${side}|${docked}|${shown}`;
+  if (key === pageBarKey) return;
+  const [wasMode, wasSide, wasDocked] = pageBarKey.split('|');
+  const reflow = (wasDocked === 'true') !== docked || (docked && (wasMode !== mode || wasSide !== side));
+  pageBarKey = key;
+  const b = document.body.classList;
+  b.toggle('pagebar-docked', docked);
+  b.toggle('dots-hidden', mode === 'hidden'); // swipes, the volume keys and a long press on an empty spot still work (#475)
+  b.toggle('pagebar-left', side === 'left');
+  b.toggle('pagebar-right', side === 'right');
+  $('dots').classList.toggle('pagebar', shown);
+  $('dots').classList.toggle('pb-vertical', shown && side !== 'bottom');
+  // a docked bar changes the size of the pages: keep the current one in place
+  if (reflow) requestAnimationFrame(() => goPage(curPage, true));
+}
+/** Whether the dots show as a page bar down the left or right edge (slides then go up and down). */
+const barVertical = () => $('dots').classList.contains('pagebar') && $('dots').classList.contains('pb-vertical');
+/** Where a pointer is along the bar, and across it. */
+const along = (e) => (barVertical() ? e.clientY : e.clientX);
+const across = (e) => (barVertical() ? e.clientX : e.clientY);
+/** The page whose dot is nearest to position a along the bar. */
+function dotAt(a) {
+  const v = barVertical();
+  let best = 0, gap = Infinity;
+  $('dots').querySelectorAll('.dot').forEach((d, i) => {
+    const r = d.getBoundingClientRect();
+    const dist = v ? Math.abs(a - (r.top + r.height / 2)) : Math.abs(a - (r.left + r.width / 2));
+    if (dist < gap) { gap = dist; best = i; }
+  });
+  return best;
+}
+/** Ends a slide along the dots: no dot is aimed at any more, and the page name fades. */
+function endScrub() {
+  if (!scrubFrom) return;
+  const was = scrubFrom.at;
+  scrubFrom = null;
+  $('dots').querySelectorAll('.dot.aim').forEach((d) => d.classList.remove('aim'));
+  if (was !== null) showPageName(-1);
+}
 /** Cancels any pending long-press hold timer on the #dots bar. */
 function clearDotsHold() {
   if (dotsHoldTimer) { clearTimeout(dotsHoldTimer); dotsHoldTimer = 0; }
@@ -2064,11 +2190,18 @@ function clearDotsHold() {
 }
 $('dots').addEventListener('pointerdown', (e) => {
   heldDots = false;
+  scrubbed = false;
   clearDotsHold();
   if (pages.length < 2 || dimmed || document.body.classList.contains('waking')) return;
+  if (pageBarMode() === 'auto') {
+    const opening = !$('dots').classList.contains('pagebar');
+    showPageBar();
+    if (opening) { scrubbed = true; return; } // this touch only opens the bar
+  }
   if (e.pointerType === 'mouse' && e.button !== 0) return;
-  if (e.target.closest('.page-pause')) return;
+  if (e.target.closest('.page-pause, .page-all')) return;
   dotsHoldStart = [e.clientX, e.clientY];
+  scrubFrom = { a: along(e), c: across(e), id: e.pointerId, at: null };
   dotsHoldTimer = setTimeout(() => {
     dotsHoldTimer = 0;
     dotsHoldStart = null;
@@ -2078,7 +2211,38 @@ $('dots').addEventListener('pointerdown', (e) => {
 });
 $('dots').addEventListener('pointermove', (e) => {
   if (dotsHoldStart && Math.hypot(e.clientX - dotsHoldStart[0], e.clientY - dotsHoldStart[1]) > 10) clearDotsHold();
+  // sliding along the dots scrubs through the pages: the page under the finger is named, and opened on release
+  if (!scrubFrom || e.pointerId !== scrubFrom.id) return;
+  if (e.pointerType === 'mouse' && e.buttons === 0) { endScrub(); return; } // released outside the bar
+  if (scrubFrom.at === null) {
+    // a touch keeps its target while it moves, so a press that went up or down off the bar is ended here
+    if (Math.abs(across(e) - scrubFrom.c) > 24) { scrubFrom = null; return; }
+    if (Math.abs(along(e) - scrubFrom.a) <= 10) return;
+    try { $('dots').setPointerCapture(e.pointerId); } catch (_) {}
+  }
+  // a slide that wanders far up or down off the bar is called off: nothing opens when the finger lifts
+  if (Math.abs(across(e) - scrubFrom.c) > 60) { endScrub(); scrubbed = true; return; }
+  const at = dotAt(along(e));
+  if (at === scrubFrom.at) return;
+  scrubFrom.at = at;
+  $('dots').querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('aim', i === at));
+  $('dots').querySelectorAll('.dot')[at]?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); // a bar with more pages than fit
+  showPageName(at, true);
+  haptic();
 });
+$('dots').addEventListener('pointerup', (e) => {
+  if (!scrubFrom || e.pointerId !== scrubFrom.id) return;
+  const at = scrubFrom.at;
+  endScrub();
+  if (at === null) return;
+  scrubbed = true; // the click that follows a scrub opens nothing
+  setTimeout(() => { scrubbed = false; }, 0);
+  if (at !== curPage) goPage(at, true);
+  else flashTitle();
+});
+$('dots').addEventListener('pointercancel', endScrub);
+// a press that leaves the bar before it became a slide is over (its release happens elsewhere)
+$('dots').addEventListener('pointerleave', (e) => { if (scrubFrom && e.pointerId === scrubFrom.id && scrubFrom.at === null) scrubFrom = null; });
 ['pointerup', 'pointercancel', 'pointerleave'].forEach((ev) => $('dots').addEventListener(ev, clearDotsHold));
 window.addEventListener('blur', clearDotsHold);
 $('dots').addEventListener('click', (e) => {
@@ -2090,7 +2254,11 @@ $('dots').addEventListener('click', (e) => {
       return;
     }
   }
-  if (e.target.closest('.page-pause')) return;
+  if (scrubbed) { scrubbed = false; e.preventDefault(); e.stopPropagation(); return; }
+  if (e.target.closest('.page-pause, .page-all')) return;
+  const dot = e.target.closest('.dot');
+  const i = dot ? +dot.dataset.i : -1;
+  if (i >= 0 && i !== curPage && i < pages.length) { haptic(); goPage(i, Math.abs(i - curPage) > 1); return; }
   openOverview();
 });
 
@@ -2113,11 +2281,25 @@ let swipeStartPage = 0;
 let swipeStartTime = 0;
 let swipeTracking = false;
 
+/**
+ * Whether a sideways swipe that starts on el turns the page, as the browser decides it from touch-action: the wrap at
+ * either end follows the same rule as an ordinary page turn. A button or a card turns the page; the page dots, a
+ * slider or anything else that keeps sideways moves for itself does not (#487).
+ */
+function swipeTurnsPage(el) {
+  for (let n = el; n && n !== pager; n = n.parentElement) {
+    const ta = getComputedStyle(n).touchAction;
+    if (ta !== 'auto' && ta !== 'manipulation' && !/pan-(x|left|right)/.test(ta)) return false;
+  }
+  return true;
+}
+
 pager.addEventListener('touchstart', (e) => {
   swipeTracking = false;
   if (e.touches.length !== 1 || pages.length < 2) return;
   // Dragging a slider, the volume bar, a list or the station carousel must never flip (or wrap) the page.
-  if (volDragging || e.target.closest?.('button, input, textarea, select, a, [contenteditable], .s-list, .vb, .bar, .radio-carousel-track, .ac-dial')) return;
+  if (volDragging || e.target.closest?.('input, textarea, select, [contenteditable], .s-list, .vb, .bar, .radio-carousel-track, .ac-dial')
+    || !swipeTurnsPage(e.target)) return;
   swipeStartX = e.touches[0].clientX;
   swipeStartY = e.touches[0].clientY;
   swipeStartPage = curPage;
@@ -2206,6 +2388,18 @@ export function setNight(on) {
   nightOn = on;
   document.body.classList.toggle('night', on);
   applyBrightness(true);
+}
+let unreachableSince = 0;
+
+function reconcileUnreachableNight(now = new Date()) {
+  const enabled = !PREVIEW && cfg.display?.nightWhenUnreachable === true;
+  if (!enabled) unreachableSince = 0;
+  else if (online === false && unreachableSince === 0) unreachableSince = Date.now();
+  const delayMin = Math.max(1, Math.min(30, +cfg.display?.unreachableNightDelayMin || 5));
+  const unreachable = enabled && unreachableSince > 0
+    && Date.now() - unreachableSince >= delayMin * 60_000;
+  const dark = darkRoom && cfg.display?.nightWhenDark === true;
+  setNight((isNight(now) || dark || unreachable) && Date.now() > wakeUntil);
 }
 /**
  * Before widgets are built: a timer that ran out while the panel was closed rings during the build, so the night
@@ -2313,22 +2507,45 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) undi
 export function tick() {
   if (lastHour12 !== null && hour12() !== lastHour12) { buildLayout(); renderRulesBtn(); }
   const now = new Date();
-  $('nClock').textContent = fmtHM(now);
+  $('nClock').textContent = fmtNightClock(now);
   $('nDate').textContent = now.toLocaleDateString(LOCALE, { weekday: 'long', day: 'numeric', month: 'long' });
   if (darkSince && Date.now() - darkSince > 30_000) darkRoom = true;
-  const dark = darkRoom && cfg.display?.nightWhenDark === true;
-  setNight((isNight(now) || dark) && Date.now() > wakeUntil);
+  reconcileUnreachableNight(now);
   if (!PREVIEW && idleDue() && !navQueue.some((r) => r.kind === 'home')) {
     if (curPage === homeIndex()) { closeSheet(); closeOverview(); lastNav = Date.now(); } // only a sheet to close
     else { navQueue.push({ kind: 'home', at: Date.now(), priority: -1 }); pump(); }
   }
   applyBurnIn();
   document.body.classList.toggle('controls-top', cfg.display?.controlsTop === true);
+  applyPageBar();
   if (!nightOn) emit('tick');
   setTimeout(tick, 1000 - (Date.now() % 1000) + 5);
 }
 
 // ---------------------------------------------------------------- data from the agent
+// The wallpaper (Settings › Display): one picture behind every page, darkened and optionally blurred so the widgets
+// stay readable. Its revision is in the URL, so an unchanged picture comes from the cache and a new one is fetched.
+let wallpaperRev = null;
+function applyWallpaper(w = {}) {
+  const rev = cfg.wallpaperRev ?? null;
+  let el = document.getElementById('wallpaper');
+  document.body.classList.toggle('has-wallpaper', rev != null);
+  if (rev == null) { el?.remove(); wallpaperRev = null; return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'wallpaper';
+    el.setAttribute('aria-hidden', 'true');
+    document.body.prepend(el);
+  }
+  const num = (v, def, max) => (Number.isFinite(+v) && v !== null && v !== '' ? Math.min(max, Math.max(0, +v)) : def);
+  el.style.setProperty('--wp-dim', String(num(w.dim, 45, 90) / 100));
+  el.style.setProperty('--wp-blur', `${num(w.blur, 0, 20)}px`);
+  if (rev !== wallpaperRev) {
+    el.style.backgroundImage = `url("${API}/wallpaper?v=${encodeURIComponent(String(rev))}")`;
+    wallpaperRev = rev;
+  }
+}
+
 export function applyDisplay() {
   const d = cfg.display || {};
   const langChanged = I18n ? I18n.setLang(d.language || 'auto') : false;
@@ -2342,6 +2559,7 @@ export function applyDisplay() {
   document.documentElement.style.setProperty('--accent', `rgb(${DEFAULT_AMBIENT})`);
   artTint = d.artTint !== false;
   if (before !== DEFAULT_AMBIENT || !artTint) setAmbient(artTint ? currentArtColor : null);
+  applyWallpaper(d.wallpaper);
   if (langChanged) { buildLayout(); renderApproval(); }
   renderRulesBtn();
   if (PREVIEW || !bridge) return;
@@ -2484,7 +2702,10 @@ export function setOnline(on) {
   wakeRender();
   if (on && online !== true) { loadConfig(); loadQuotas(); loadWork(); loadPush(); loadApprovals(); loadCalendar(); }
   const changed = online !== on;
+  if (!on && changed) unreachableSince = unreachableSince || Date.now();
+  if (on && changed) unreachableSince = 0;
   online = on;
+  reconcileUnreachableNight();
   if (changed) emit('state');
 }
 
@@ -2529,6 +2750,7 @@ export function applyState(s, replayGen = null) {
       pushHist('hotspot', pc.gpu?.hotSpot);
       pushHist('gpupower', pc.gpu?.power ?? pc.gpu?.powerPct);
       pushHist('gpuclock', pc.gpu?.clock);
+      pushHist('cpupower', pc.cpuPower);
     }
   }
   emit('state');
@@ -2622,7 +2844,7 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden && lastHour12 !== null && hour12() !== lastHour12) {
     buildLayout();
     renderRulesBtn();
-    $('nClock').textContent = fmtHM(new Date());
+    $('nClock').textContent = fmtNightClock(new Date());
   }
 });
 poll();

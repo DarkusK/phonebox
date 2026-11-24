@@ -60,16 +60,30 @@ public sealed class AgentConfig
         return chosen.Count > 0 ? chosen : Pages;
     }
 
+    /// <summary>The home page a device chose for itself, if that page is enabled and among the ones it shows; null
+    /// otherwise, so a disabled one falls back to the global home page (the panel drops disabled pages before it looks).</summary>
+    public string? HomePageFor(string? deviceId)
+    {
+        var home = Phones.FirstOrDefault(p => p.Id == deviceId)?.HomePage;
+        return home is not null && PagesFor(deviceId).Any(p => p.Id == home && p.Enabled) ? home : null;
+    }
+
     /// <summary>The part sent to the phone: commands (shortcut cmd/args/cwd, command widget scripts) are never included.</summary>
     /// <param name="shortcutIcon">A shortcut's picture: its revision (null when it has none), and whether the user uploaded
     /// it rather than it being the program's own icon; only an upload may fill a Big button (a program icon is small, or on
     /// Linux a theme logo). One lookup gives both, so they always describe the same picture.</param>
-    public object ToPublic(string? deviceId = null, Func<Shortcut, (long? Rev, bool Upload)>? shortcutIcon = null) => new
+    /// <param name="wallpaperRev">The uploaded wallpaper's revision (null without one): the panel loads the picture
+    /// with it in the URL, so a new upload is fetched and an unchanged one comes from the cache. Sent as text: a 64-bit
+    /// value loses its last digits as a JavaScript number, and two pictures could then share a cached URL.</param>
+    public object ToPublic(string? deviceId = null, Func<Shortcut, (long? Rev, bool Upload)>? shortcutIcon = null, long? wallpaperRev = null) => new
     {
         weather = Weather,
         codexBar = CodexBar,
         night = Night,
         display = Display,
+        // this device's own home page (Settings › Phones), when it has one among the pages it shows
+        homePage = HomePageFor(deviceId),
+        wallpaperRev = wallpaperRev?.ToString(System.Globalization.CultureInfo.InvariantCulture),
         pages = PagesFor(deviceId).Select(p => new
         {
             p.Id, p.Title, p.Icon, p.Enabled, p.IdleSec, p.Appearance,
@@ -159,9 +173,20 @@ public sealed class NightConfig
     public double Brightness { get; set; } = 0.02;
 }
 
+/// <summary>The wallpaper's look; the picture itself is <see cref="WallpaperStore"/>'s.</summary>
+public sealed class WallpaperConfig
+{
+    /// <summary>How much the picture is darkened under the widgets, in percent (0–90), so they stay readable.</summary>
+    public int Dim { get; set; } = 45;
+    /// <summary>Blur in pixels (0–20); a little blur keeps a busy picture from competing with the widgets.</summary>
+    public int Blur { get; set; }
+}
+
 public sealed class DisplayConfig
 {
     public AppearanceConfig? Appearance { get; set; }
+    /// <summary>How the uploaded wallpaper (Settings › Display) is drawn behind the pages.</summary>
+    public WallpaperConfig Wallpaper { get; set; } = new();
     /// <summary>UI language code ("auto", "en", "tr", "de", "fr", "es", "it", "pt", "pt-BR", "nl", "pl", "ru", "el", "vi", "zh").</summary>
     public string Language { get; set; } = "auto";
     /// <summary>The codes the panel and the settings page are translated into (i18n.js). Casing matters for pt-BR:
@@ -177,6 +202,10 @@ public sealed class DisplayConfig
     public bool Vibrate { get; set; } = true;
     /// <summary>Show a message when a session finishes. The "needs input" message always shows.</summary>
     public bool FinishToast { get; set; } = true;
+    /// <summary>Play a chime when a session finishes.</summary>
+    public bool FinishSound { get; set; }
+    /// <summary>Sound volume (% of the phone's media volume).</summary>
+    public int FinishSoundVolume { get; set; } = 70;
     /// <summary>The phone's volume keys switch pages.</summary>
     public bool VolumeKeys { get; set; } = true;
     /// <summary>landscape, portrait or auto (follow the phone). In portrait the widgets are arranged automatically.</summary>
@@ -191,12 +220,20 @@ public sealed class DisplayConfig
     public bool AutoBrightness { get; set; }
     /// <summary>Show the night screen whenever the room is dark, not only at night.</summary>
     public bool NightWhenDark { get; set; }
+    /// <summary>Show the night screen after the paired computer's agent has been unreachable for a while.</summary>
+    public bool NightWhenUnreachable { get; set; }
+    /// <summary>Minutes to wait after the agent becomes unreachable before showing the night screen.</summary>
+    public int UnreachableNightDelayMin { get; set; } = 5;
     /// <summary>A hand near the phone (proximity sensor) wakes the night screen.</summary>
     public bool ProximityWake { get; set; } = true;
     /// <summary>OLED burn-in protection: every 2 minutes the panel moves by a few pixels and the night clock drifts.</summary>
     public bool PixelShift { get; set; }
     /// <summary>The page dots and the permission prompt's Allow / Deny buttons at the top, for a panel whose bottom edge is hard to reach.</summary>
     public bool ControlsTop { get; set; }
+    /// <summary>How the panel shows its pages: dots, auto (a bar with each page's icon and name while the dots are used), bar (always, with its own strip of the screen) or hidden (no dots: swipe, and hold an empty spot for all pages).</summary>
+    public string PageBar { get; set; } = "dots";
+    /// <summary>Where the page bar goes: bottom (the top with <see cref="ControlsTop"/>), left or right.</summary>
+    public string PageBarSide { get; set; } = "bottom";
     /// <summary>OLED burn-in protection: dim the panel after this many minutes without a touch; 0 = never.</summary>
     public int IdleDimMin { get; set; }
     /// <summary>Screen pinning: Home and Recents stay on the panel.</summary>
@@ -255,12 +292,18 @@ public sealed class ClaudeConfig
     /// <summary>Show each Claude Code chat's title on the phone. The title is the name you gave the chat or the one
     /// Claude Code wrote, which it often draws from your first prompt, so it stays off until you turn it on.</summary>
     public bool ShareSessionTitles { get; set; }
+    /// <summary>Windows: also show the Claude Code sessions (and use the sign-in for the quota, when Windows has none)
+    /// of the running WSL distros' default users. A stopped distro is never started for it (off by default).</summary>
+    public bool WatchWsl { get; set; }
 }
 
 public sealed class CursorConfig
 {
     /// <summary>Show recent Cursor agent chats on the AI sessions widget (off by default).</summary>
     public bool Sessions { get; set; }
+    /// <summary>Windows: also read the agent chats Cursor keeps inside the running WSL distros (projects opened over
+    /// Remote - WSL). A stopped distro is never started for it (off by default).</summary>
+    public bool WatchWsl { get; set; }
 }
 
 public sealed class AntigravityConfig
@@ -406,11 +449,22 @@ public sealed class DiscordConfig
     public bool Enabled { get; set; }
     public string? ClientId { get; set; }
     public string? ClientSecret { get; set; }
-    /// <summary>Allow /api/discord/{action} without a Discord widget (off by default).</summary>
+    /// <summary>
+    /// Allow mute, deafen, leave and join through <c>/api/discord/{action}</c> without a Discord widget: for shortcuts,
+    /// scripts and custom widgets. Off by default; then only a Discord widget with its <c>control</c> option on, on an
+    /// enabled page, allows them.
+    /// </summary>
     public bool AllowControl { get; set; }
-    /// <summary>Screen share from the phone (off by default); asks Discord for rpc.screenshare.read / .write.</summary>
+    /// <summary>
+    /// Screen share from the phone (off by default). Asks Discord for rpc.screenshare.read / .write, so Discord asks to
+    /// approve PhoneBox again; lists the apps with a window (names only) while the share view is open on the phone.
+    /// </summary>
     public bool ScreenShare { get; set; }
-    /// <summary>Read-only chat and new-message dots (off by default); asks Discord for messages.read.</summary>
+    /// <summary>
+    /// The Discord widget's chat (read-only) and new-message dots: asks Discord for the <c>messages.read</c> scope (one
+    /// more approval in Discord) and sends message text to the phone. Off by default. Message text stays in the agent's
+    /// memory only, for as long as the connection to Discord lasts.
+    /// </summary>
     public bool Chat { get; set; }
 }
 
@@ -434,6 +488,8 @@ public sealed class PhoneConfig
     public string Name { get; set; } = "";
     /// <summary>Page ids this phone shows, in the usual order; empty or null = all pages.</summary>
     public List<string>? Pages { get; set; }
+    /// <summary>The page this device returns to (idle return, home button); null = the global home page.</summary>
+    public string? HomePage { get; set; }
 }
 
 public sealed class FeedSource
@@ -633,11 +689,22 @@ public sealed partial class ConfigStore(string path)
         foreach (var action in c.Controls.Actions) { action.Target ??= ""; action.Kind ??= "shortcut"; action.Label ??= action.Id; }
         c.Controls.Profiles = c.Controls.Profiles.Where(p => p is not null && !string.IsNullOrWhiteSpace(p.Id)).DistinctBy(p => p.Id).Take(128).ToList();
         foreach (var profile in c.Controls.Profiles) { profile.Levels = (profile.Levels ?? []).Where(l => l is not null).Take(512).ToList(); profile.Defaults ??= []; profile.Actions = (profile.Actions ?? []).Where(a => !string.IsNullOrEmpty(a)).Take(64).ToList(); profile.Label ??= profile.Id; }
+        c.Controls.PlexUrl = PlexControl.NormalizeUrl(c.Controls.PlexUrl);
+        c.Controls.PlexPlayerUrl = PlexControl.NormalizeUrl(c.Controls.PlexPlayerUrl) ?? PlexControl.DefaultPlayerUrl;
+        // a control character (a stray newline from a paste) can't be part of a token, and would break the request header
+        c.Controls.PlexToken = new string((c.Controls.PlexToken ?? "").Where(ch => !char.IsControl(ch)).ToArray()).Trim() is { Length: > 0 } plexToken
+            ? Cap(plexToken, 256) : null;
         c.Display ??= new();
         c.Display.Appearance?.Normalize();
         c.Display.Hour12 = Hour12JsonConverter.Normalize(c.Display.Hour12);
+        c.Display.PageBar = c.Display.PageBar is "dots" or "auto" or "bar" or "hidden" ? c.Display.PageBar : "dots";
+        c.Display.PageBarSide = c.Display.PageBarSide is "bottom" or "left" or "right" ? c.Display.PageBarSide : "bottom";
         c.Display.IdleReturnSec = Math.Clamp(c.Display.IdleReturnSec, 0, 3600);
         c.Display.IdleDimMin = Math.Clamp(c.Display.IdleDimMin, 0, 1440);
+        c.Display.Wallpaper ??= new();
+        c.Display.Wallpaper.Dim = Math.Clamp(c.Display.Wallpaper.Dim, 0, 90);
+        c.Display.Wallpaper.Blur = Math.Clamp(c.Display.Wallpaper.Blur, 0, 20);
+        c.Display.UnreachableNightDelayMin = Math.Clamp(c.Display.UnreachableNightDelayMin, 1, 30);
         // a language the panel does not have falls back to following the phone / browser. Matched case-insensitively
         // so "PT-br" still resolves, but stored in its canonical casing: i18n.js looks pt-BR up by exact code.
         var lang = (c.Display.Language ?? "").Trim();
@@ -646,6 +713,7 @@ public sealed partial class ConfigStore(string path)
         c.Display.TouchGraceSec = Math.Clamp(c.Display.TouchGraceSec, 0, 600);
         c.Display.MinDwellSec = Math.Clamp(c.Display.MinDwellSec, 0, 600);
         c.Display.HoldMaxMin = Math.Clamp(c.Display.HoldMaxMin, 0, 1440);
+        c.Display.FinishSoundVolume = Math.Clamp(c.Display.FinishSoundVolume, 10, 100);
         c.Lan ??= new();
         c.Updates ??= new();
         c.Ping ??= new();
@@ -736,6 +804,7 @@ public sealed partial class ConfigStore(string path)
             ph.Name = ph.Name?.Trim() ?? "";
             ph.Pages = ph.Pages?.Where(id => !string.IsNullOrWhiteSpace(id)).Select(PageId).Distinct().ToList();
             if (ph.Pages is { Count: 0 }) ph.Pages = null;
+            ph.HomePage = string.IsNullOrWhiteSpace(ph.HomePage) ? null : PageId(ph.HomePage).Trim();
         }
         c.Ping ??= new();
         c.Ping.Adapters = (c.Ping.Adapters ?? []).Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Take(16).ToList();

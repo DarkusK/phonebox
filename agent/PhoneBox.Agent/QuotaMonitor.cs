@@ -59,6 +59,34 @@ public sealed partial class QuotaMonitor(ConfigStore config, ILogger<QuotaMonito
     internal string CredentialsPath { get; init; } = DefaultCredentialsPath;
 
     /// <summary>
+    /// The credentials files of Claude Code inside the running WSL distros, when WSL watching is on for Claude Code
+    /// (Windows only). Tests give a finder of their own.
+    /// </summary>
+    internal Func<IEnumerable<string>>? FindWslCredentials { get; init; }
+
+    /// <summary>Whether a credentials file holds a Claude Code sign-in (an access token), not just a plan.</summary>
+    internal static bool HasCliSignIn(string? json)
+    {
+        if (string.IsNullOrEmpty(json)) return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("claudeAiOauth", out var o) && o.ValueKind == JsonValueKind.Object
+                && o.TryGetProperty("accessToken", out var t) && t.ValueKind == JsonValueKind.String && t.GetString() is { Length: > 0 };
+        }
+        catch (JsonException) { return false; }
+    }
+
+    /// <summary>Each running distro's credentials file with its distro (tests give paths without one, and no check).</summary>
+    private IEnumerable<(string? Distro, string Path)> WslCredentialsPaths()
+    {
+        if (FindWslCredentials is not null) return FindWslCredentials().Select(p => ((string?)null, p));
+        if (config?.Get().Claude.WatchWsl != true) return [];
+        return WslHomes.Running().Select(wsl => ((string?)wsl.Distro, Path.Combine(wsl.Home, ".claude", ".credentials.json")));
+    }
+
+    /// <summary>
     /// Reads Claude Code's macOS Keychain item; null uses the `security` tool, and only for the default credentials path
     /// on macOS. Tests give a reader of their own so nothing here touches the real Keychain.
     /// </summary>
@@ -357,28 +385,38 @@ public sealed partial class QuotaMonitor(ConfigStore config, ILogger<QuotaMonito
     private async Task RunUsageLoopAsync(CancellationToken ct)
     {
         LoadClaudeCache(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        var wakes = Wake.Count;
         while (!ct.IsCancellationRequested)
         {
+            // Capture before the poll so a /api/refresh during CodexBar/Claude work still ends the wait below.
+            var wake = Wake.Pending;
+            // /api/refresh (Wake.Now) must re-poll CodexBar; otherwise Cursor stays on a stale "No session" for up to 3 minutes.
+            if (Wake.Count != wakes)
+            {
+                wakes = Wake.Count;
+                _nextCodexBar = 0;
+            }
             if (Environment.TickCount64 >= _nextCodexBar)
             {
                 var path = ToolProcess.Find("codexbar");
                 try
                 {
-                    if (path is null) _external = _external.Select(p => p with { Error = "CodexBar is not installed" }).ToList();
+                    if (path is null)
+                        _external = _external.Select(p => p with { Error = "CodexBar is not installed" }).ToList();
                     else
                     {
                         var latest = await CodexBar.ReadAsync(path, ct);
-                        _external = latest.Select(p => p.Limits.Count == 0 && _external.FirstOrDefault(old => old.Id == p.Id) is { } cached
-                            ? cached with { Error = p.Error ?? "CodexBar returned no data" } : p)
-                            .Concat(_external.Where(old => !latest.Any(p => p.Id == old.Id)).Select(p => p with { Limits = [], Error = "CodexBar omitted this provider" })).ToList();
+                        _external = CodexBar.Merge(_external, latest, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
                     }
+                    // Keep the usual 3-minute interval even when Cursor fails persistently under launchd (avoids hammering Claude's rate-limited usage endpoint).
                     _nextCodexBar = Environment.TickCount64 + 180_000;
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
                 catch (Exception ex)
                 {
                     log.LogDebug("CodexBar: {Message}", ex.Message);
-                    _external = _external.Select(p => p with { Error = "CodexBar refresh failed" }).ToList();
+                    // Do not wipe last-good limits — only mark an error when there is nothing to show.
+                    _external = _external.Select(p => p.Limits.Count > 0 ? p : p with { Error = "CodexBar refresh failed" }).ToList();
                     _nextCodexBar = Environment.TickCount64 + 60_000;
                 }
             }
@@ -393,7 +431,10 @@ public sealed partial class QuotaMonitor(ConfigStore config, ILogger<QuotaMonito
             try { await ClaudeTickAsync(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), ct); }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
             catch (Exception ex) { log.LogWarning("claude quota: {Msg}", ex.Message); } // never end the loop for Codex and Antigravity
-            await Wake.Delay(TimeSpan.FromSeconds(30), ct);
+            // Zero when the CodexBar deadline has already passed (do not sleep another 30 s); otherwise min(30 s, remaining).
+            var untilCodex = Math.Max(0L, _nextCodexBar - Environment.TickCount64);
+            var wait = TimeSpan.FromMilliseconds(Math.Min(30_000L, untilCodex));
+            await Wake.Delay(wait, ct, wake);
         }
     }
 
@@ -447,6 +488,24 @@ public sealed partial class QuotaMonitor(ConfigStore config, ILogger<QuotaMonito
         string? json = null;
         try { if (File.Exists(CredentialsPath)) json = await File.ReadAllTextAsync(CredentialsPath, ct); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return; }
+        // Claude Code signed in only inside WSL (Also watch Claude Code in WSL): its sign-in there, when Windows has no
+        // file or only Claude Desktop's plan without a token. A Windows sign-in with a token always comes first.
+        if ((CredentialsPath == DefaultCredentialsPath || FindWslCredentials is not null) && !HasCliSignIn(json))
+        {
+            // the first running distro whose file holds a sign-in; one with only a plan (or unreadable) is passed over.
+            // Each distro is asked about again right before its file is read: one that stopped while an earlier file was
+            // read is skipped instead of started by the read.
+            foreach (var (distro, wsl) in WslCredentialsPaths())
+            {
+                if (distro is not null && !WslHomes.IsRunning(distro)) continue;
+                try
+                {
+                    var wslJson = await File.ReadAllTextAsync(wsl, ct);
+                    if (HasCliSignIn(wslJson)) { json = wslJson; break; }
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            }
+        }
         // macOS: Claude Code stores the credentials in the login Keychain (read-only access). It is read when there is
         // no file, and when the file's token is missing or expired: a stale file must not hide a renewed Keychain sign-in.
         if (KeychainReader() is { } readKeychain

@@ -63,9 +63,10 @@ More templates: **Clock**, **Focus** (pomodoro + note), **Calm** (breathing), **
 
 **Getting around.** Swipe; press the phone's **volume keys** to flip pages; tap the page dots (or long-press an empty
 spot) for an overview of all pages and jump straight to one. Webhooks and rules can switch pages too; they count down
-first (*"switching to AI in 3…"*, with Stay and Go now) and never pull a page away while you are using the panel. The
-panel returns to the home page when idle (each page can stay longer, or for good), can dim to a clock at night and
-keeps the screen on.
+first (*"switching to AI in 3…"*, with Stay and Go now) and never pull a page away while you are using the panel.
+Settings › Display › Page navigation can also show a page bar with each page's name, or hide the dots. The panel
+returns to the home page when idle (each page can stay longer, or for good), can dim to a clock at night and keeps the
+screen on.
 
 <p align="center"><img src="screenshots/overview.png" width="600" alt="Page overview"></p>
 
@@ -75,7 +76,7 @@ keeps the screen on.
 |---|---|
 | **Time** | Clock (with status line and weather) · Analog clock (any time zone) · **Word clock** · World clocks · Calendar · **Next up** · Time progress (day / week / month / year) · Countdown · Pomodoro · Quick timer · Stopwatch |
 | **Weather & sky** | Weather · Forecast (hourly / 7 days) · Sun & moon (daylight left, UV, moon phase) · **Moon** · Air quality (European AQI, PM2.5, PM10, O₃, NO₂) |
-| **Computer** | **Rules** (which hold, pause) · **Battery care** · On air (microphone / camera / OBS) · OBS Studio (live, recording, scenes) · **Dictation** (speak on the phone, typed on the PC; the app asks for the microphone on first use) · **App console** (Windows: keys and a dial for the app in front, set per app in Settings › General; use the focused app's process name from Task Manager's Details tab; packaged Store apps can all show up as `ApplicationFrameHost` and terminal tabs as `WindowsTerminal`, so a profile for those names covers all of them) · Device batteries (headphones, mice, keyboards) · Docker / Podman (containers, start / stop) · Metric tile · Gauge · Chart · GPU details · Memory & disks · Top processes · Processes · Now playing · Radio · Volume · **Spectrum bars** (Windows: a live spectrum of what the PC is playing, like the classic LED bar visualizers) · Shortcut grid · Big button (optionally filled with the shortcut's uploaded picture) · **Command** (PowerShell / bash / zsh output, refreshed every N seconds) · **Trackpad** (control PC cursor, tap to click, hold to drag, scroll) |
+| **Computer** | **Rules** (which hold, pause) · **Battery care** · On air (microphone / camera / OBS) · OBS Studio (live, recording, scenes) · **Dictation** (speak on the phone, typed on the PC; the app asks for the microphone on first use) · **App console** (Windows: keys and a dial for the app in front, set per app in Settings › General; use the focused app's process name from Task Manager's Details tab; packaged Store apps can all show up as `ApplicationFrameHost` and terminal tabs as `WindowsTerminal`, so a profile for those names covers all of them) · **Steam library** (installed games with covers, most recently played first; starting a game only when the widget allows it) · Device batteries (headphones, mice, keyboards) · Docker / Podman (containers, start / stop) · Metric tile · Gauge · Chart · GPU details · Memory & disks · Top processes · Processes · Now playing · Radio · Volume · **Spectrum bars** (Windows: a live spectrum of what the PC is playing, like the classic LED bar visualizers) · Shortcut grid · Big button (optionally filled with the shortcut's uploaded picture) · **Command** (PowerShell / bash / zsh output, refreshed every N seconds) · **Trackpad** (control PC cursor, tap to click, hold to drag, scroll) |
 | **AI & code** | AI quotas · Quota ring · AI sessions (Claude Code, Codex, Cursor, OpenCode, Antigravity) · GitHub |
 | **Personal** | **Agenda** (Google / Outlook / iCloud calendars) · Note (edit it from the phone) · Checklist (resets daily) · Counter · Breathe · Quote · Title · Phone battery · **Computers** (switch between paired computers) · **Photo frame** (a slideshow from a photo folder on the PC or an Immich album) |
 | **Web & data** | **Custom HTML** (your own widget, sandboxed) · **Home Assistant** (entities with their own name and icon, tap to switch) · **Pushed value** · **Notifications** (both fed by [webhooks](#webhooks)) · **News feeds** (RSS and Atom feeds with categories, OPML/bulk import, and category filtering; with its "Open articles on the PC" option, a tap opens the article on the PC) · Hacker News · Exchange rates (ECB) · Crypto prices · Image / webcam · **Camera** (a live picture from an IP camera over RTSP, pulled by ffmpeg on the PC) |
@@ -118,6 +119,23 @@ vibrate for them). **Tick while scrolling**, off by default, adds a light tick f
 settings, **Haptic feedback** sets how strong they are (no vibration, light, normal or strong). The vibrations follow the
 display's vibration switch and night mode like the panel's other ones.
 
+**Steam library** shows the Steam games installed on this computer: the favorites you tick in the widget's options
+first, in the order you ticked them, then the most recently played, with their covers, the game being played and update progress.
+**Games shown** sets how many appear (8 by default), and **Show only the favorite games** hides the rest. The agent reads
+Steam's own files, so the widget needs no Steam API key, no sign-in and no internet, and nothing is sent to Steam:
+`libraryfolders.vdf` and the `appmanifest_*.acf` file of each game in every library folder, `localconfig.vdf` for when a
+game was last played, covers from Steam's `appcache/librarycache`, and Steam's `RunningAppID` (the registry on Windows,
+`registry.vdf` on Linux and macOS). It reads them only while the widget is on an enabled page, at most every two seconds
+however many phones ask, and parses a file again only after it changed; each file has a size limit. Steam tools and
+runtimes (Proton, Steamworks Common Redistributables…) are left out.
+
+Starting a game from the phone is off by default: turn on **Let the phone start games** in the widget's options. Each
+Steam library widget decides for itself: the agent checks the option of the widget a tap comes from. With
+**Ask before starting** (on by default) the first tap marks the game and a second tap within four seconds starts it.
+The phone sends only the game's app id; the agent starts it only if that id is installed right then, by handing
+Steam's own `steam://rungameid/<id>` link to the system (Windows' URL handler, `xdg-open` on Linux, `open` on macOS).
+Steam may still ask on the computer before a game starts, for example to install an update first.
+
 **Smart Stack** combines up to 12 widgets in one slot. Add it from the Layout category, then drag widgets into it or
 use its picker. Reorder cards, open their settings, or disable individual cards. Tap the dots or swipe vertically to
 change cards; horizontal swipes still change pages. Focused controls pause rotation. Command widgets belong directly
@@ -141,18 +159,35 @@ account-wide limits through `codex app-server` even when no Codex session is act
 while an enabled page shows Codex quotas and fresh CodexBar data is not already winning, and backs off on failures.
 Because it starts the Codex CLI, Codex may refresh its own sign-in in `~/.codex/auth.json`.
 
-**Native Antigravity quotas** use a running app/hub's advertised HTTP port and CSRF token, the HTTPS port of newer
-IDE servers (2.32 picks it at start-up, so the agent tries the loopback ports that server process listens
-on and accepts its self-signed certificate only for loopback addresses), or a signed-in
-`agy` CLI (1.1.11 or later). The CLI fallback runs `agy -p /usage --output-format json`, without a model prompt,
-and also finds the standard Windows installation in `%LOCALAPPDATA%\agy\bin`. Run `agy` in your terminal to sign
-in if needed. The agent reads measured session and weekly buckets, plus the plan when the local server provides it;
-CLI reports without plan metadata keep the neutral Antigravity title. Older IDE servers can supply model quotas
-through `GetUserStatus`; unavailable measurements are skipped, and weekly limits are never invented. Refresh
+**Native Antigravity quotas** use a running app/hub's advertised HTTP port and CSRF token, the HTTPS port of newer IDE
+servers (2.32 picks it at start-up, so the agent tries the loopback ports that server process listens on and accepts
+its self-signed certificate only for loopback addresses), or a signed-in `agy` CLI (1.1.11 or later). The CLI fallback
+runs `agy -p /usage --output-format json`, without a model prompt, and also finds `agy` when its folder is not on
+PATH: in `%USERPROFILE%\.gemini\bin`, where the current Windows installer and its self-update put it, in
+`%LOCALAPPDATA%\agy\bin` from older Windows installers, and in `~/.gemini/bin` on macOS and Linux. To sign in, run
+`agy` in a terminal, by its full path when its folder is not on PATH (for example `%USERPROFILE%\.gemini\bin\agy.exe`
+or `~/.gemini/bin/agy`). The agent reads measured session and weekly buckets, plus the plan when the local server
+provides it; CLI reports without plan metadata keep the neutral Antigravity title. Older IDE servers can supply model
+quotas through `GetUserStatus`; unavailable measurements are skipped, and weekly limits are never invented. Refresh
 failures retain the last measurements with an error.
 
 Tap an AI session to see its model, timing and token details. Token counters describe the local session rather than
 the account allowance. Prompt/response text and tool arguments are not included in this panel data.
+
+## Synced lyrics
+
+The **Synced lyrics** widget shows the words of the song playing on the computer, the sung line lit and kept in the
+middle, from [LRCLIB](https://lrclib.net), a free and open lyrics database. It isn't tied to Spotify: it uses the track
+the agent shows in Now playing (title, artist, album, length and position), whichever player reports it.
+
+Nothing is looked up until you turn on the widget's **Look up lyrics on LRCLIB** (off by default); each widget has its
+own switch. Then the agent (never the phone) asks LRCLIB once per song, only for a widget with the option on while it
+is on an enabled page, and sends the title, artist, album and length, nothing about you. Answers stay in memory, never on disk; after a failure the agent
+leaves LRCLIB alone for a while (1 minute, doubling up to 30, or as long as LRCLIB asks).
+
+Songs without timed lyrics show their plain lyrics, unless you turn that off. A player that reports no position (no
+timeline in Now playing) gets the words as a page, with a note that the lines can't follow the song. *Timing offset*
+moves the lines earlier (positive) or later when a song's timing is off.
 
 ## Layout editor & settings
 
@@ -179,7 +214,11 @@ Double-click the tray icon on Windows (or open <http://127.0.0.1:8765>):
   wake it and open PhoneBox on unlock, with an ADB connection; phones secured by a PIN or password must be unlocked
   manually). Lock sync needs the agent to run in the macOS GUI session; [battery care](#rules);
   [AI agent permission prompts](#ai-agent-permission-prompts);
-  phones (several at once, each with its own pages); Wi-Fi & Tailscale; updates.
+  phones (several at once, each with its own pages and home page); Wi-Fi & Tailscale; updates.
+- **The panel on a monitor:** `http://127.0.0.1:8765/panel/?device=monitor` (any name of letters and digits, up to 32 of them) opens the
+  panel in a browser as a device of its own. It shows up under **Phones** once it has loaded, so it can get its own
+  pages and home page there, like a phone; without `?device=` the browser shows every page and follows the global
+  home page.
 - **Photo frame** (in General): the Photo frame widget shows a folder on this computer, or one album of an Immich
   server: enter its address and an API key with the `album.read`, `asset.read` and `asset.view` permissions, press
   **Load albums** and pick one. The Immich source has been tested with Immich 3.4.2 (and earlier with 3.4.1); other versions may work.
@@ -395,6 +434,15 @@ switchable ports). The panel keeps running over Wi-Fi while the USB power is off
   arguments. Cursor sessions (opt-in in **Settings › General › Cursor sessions**) come from recent agent transcripts
   under `~/.cursor/projects/*/agent-transcripts`. Only the last message's role is kept; chat text is never shown,
   stored or sent. Project names use the folder basename from Cursor's `workspaceStorage`.
+- **Claude Code and Cursor inside WSL** (Windows, opt-in): **Also watch Claude Code in WSL** (Settings › General, next to the Claude Code options)
+  and **Also watch Cursor in WSL** (Settings › General › Cursor sessions) read the same files in the running distros'
+  default users' homes, through `\\wsl.localhost\<distro>`, like OpenCode in WSL: only distros that are already
+  running (`wsl.exe --list --running` right before each read; a stopped one is never started) and every 5 seconds. A
+  Claude Code session counts as running while its process is alive in the distro's `/proc` with the start time Claude
+  Code wrote. *Show the conversation* reads a WSL session's chat file from the distro too. Without a Claude Code
+  sign-in on Windows (no file, or only Claude Desktop's plan), the Claude quota uses the one in WSL
+  (`~/.claude/.credentials.json`).
+  Cursor chats of projects opened over Remote - WSL are named after their folder.
 - **Native Antigravity quota:** the agent reads the running Antigravity server's port and CSRF token from its
   process arguments and queries its loopback quota/status API, or invokes the signed-in CLI's structured usage
   command. Only measured quota fields reach the panel; CLI conversation identifiers and token counters are omitted.

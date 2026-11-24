@@ -1,4 +1,4 @@
-import { $, API, D, LEVEL_COLOR, LOCALE, mediaHtml, METRICS, PANEL_HEADERS, PREVIEW, Q_STYLE, S_ORDER, ago, api, averageColor, buildLayout, buzz, cfg, chime, cfgVersion, chart, color, cssVar, currentProcessesSort, emit, fillIcon, fmtClock, fmtDur, fmtHM, fmtMem, fmtReset, fmtTime, fmtValue, gotoProcesses, gpuMem, gpusOf, h, en, haptic, hasProcessesPage, hist, hour12, icon, keyButton, setKeyFace, labelled, levelOf, media, metricText, online, openSheet, paceInfo, pad, prRow, pushView, quotaProviders, r1, registerProcessesSorter, renderStatus, ringSvg, setArtColor, configMark, configReadSince, localWriteStored, setMediaState, setVolDragging, shortDur, shortGpu, store, t, tick, toast, volDragging, wxBlock, wxDeg, wxIcon, emo, rich, tp, tpv, quotaText } from '../main.js';
+import { $, API, D, LEVEL_COLOR, LOCALE, mediaHtml, METRICS, PANEL_HEADERS, PREVIEW, Q_STYLE, S_ORDER, ago, api, averageColor, buildLayout, buzz, cfg, chime, cfgVersion, chart, color, cssVar, currentProcessesSort, emit, fillIcon, fmtClock, clockPeriod, fmtDur, fmtHM, fmtMem, fmtReset, fmtTime, fmtValue, gotoProcesses, gpuMem, gpusOf, h, en, haptic, hasProcessesPage, hist, hour12, icon, keyButton, setKeyFace, labelled, levelOf, media, metricText, online, openSheet, paceInfo, pad, prRow, pushView, quotaProviders, r1, registerProcessesSorter, renderStatus, ringSvg, setArtColor, configMark, configReadSince, localWriteStored, setMediaState, setVolDragging, shortDur, shortGpu, store, t, tick, toast, volDragging, wxBlock, wxDeg, wxIcon, emo, rich, tp, tpv, quotaText, pages, curPage, gotoPageRef } from '../main.js';
 import { W } from '../registry.js';
 import { invalidateDeckState } from './controls.js';
 
@@ -23,6 +23,7 @@ W.clock = {
     const hh = h('span', 'hh', '--'), colon = h('span', 'colon', ':'), mm = h('span', 'mm', '--'), ss = h('span', 'sec'), ap = h('span', 'ap');
     const date = o.date !== false ? h('div', 'date') : null;
     const wx = o.weather !== false ? wxBlock() : null;
+    box.classList.toggle('clock-centered', o.align === 'center');
     box.append(status || '', h('div', 'clock', hh, colon, mm, ss, ap), date || '', wx || '');
     box.style.setProperty('--tf', (0.84 - (status ? 0.1 : 0) - (date ? 0.11 : 0) - (wx ? 0.2 : 0)).toFixed(2));
     return {
@@ -33,7 +34,7 @@ W.clock = {
           const now = new Date();
           const H = now.getHours(), h12 = hour12();
           hh.textContent = h12 ? String(H % 12 || 12) : pad(H);
-          ap.textContent = h12 ? (H < 12 ? 'AM' : 'PM') : '';
+          ap.textContent = h12 ? clockPeriod(now) : '';
           mm.textContent = pad(now.getMinutes());
           ss.textContent = cfg.display?.showSeconds === false ? '' : pad(now.getSeconds());
           // the colon blinks once a second from here, not from a CSS animation: a running animation makes the browser draw a frame
@@ -310,7 +311,7 @@ W.stat = {
         unit.textContent = u;
         const pctVal = m.pct?.(s);
         lbl.textContent = pctVal != null && m.label === 'RAM' ? `RAM (${Math.round(pctVal)}%)` : tp(m.label);
-        sub.textContent = m.sub?.(s) || ' ';
+        sub.replaceChildren(h('bdi', null, m.sub?.(s) || ' '));
         chart(canvas, [{ data: hist[m.hist || o.metric] || hist.cpu, color: c, max: m.max(s) }]);
       },
     };
@@ -340,7 +341,7 @@ W.gauge = {
         svg = dial.firstElementChild;
         const [v, u] = metricText(m, s);
         pct.replaceChildren(v, h('small', null, u));
-        sub.textContent = m.sub?.(s) || '';
+        sub.replaceChildren(h('bdi', null, m.sub?.(s) || ''));
       },
     };
   },
@@ -367,7 +368,7 @@ W.chart = {
         if (!s) return;
         if (single) {
           const [v, u] = metricText(single, s);
-          main.replaceChildren(h('b', null, v), h('small', null, u), h('span', 'chips', single.sub?.(s) ? h('span', 'chip', single.sub(s)) : ''));
+          main.replaceChildren(h('b', null, v), h('small', null, u), h('span', 'chips', single.sub?.(s) ? h('span', 'chip', h('bdi', null, single.sub(s))) : ''));
           head.lastChild.textContent = single.title?.(s) || '';
         } else {
           main.replaceChildren(...keys.map((k) => {
@@ -679,7 +680,9 @@ W.sessions = {
         h('div', full ? 'conv-text' : 'conv-text clamp', full ? m.text : clip(m.text, 500)));
       const render = () => {
         const prevList = box.querySelector('.conv-list');
-        const top = prevList ? prevList.scrollTop : null;
+        // a list read to its end follows the chat as new messages come in; one scrolled back stays where it is (#460)
+        const atEnd = !prevList || prevList.scrollHeight - prevList.scrollTop - prevList.clientHeight < 24;
+        const top = prevList && !atEnd ? prevList.scrollTop : null;
         labels = [];
         if (!data.enabled) {
           box.replaceChildren(h('p', 'session-note', tp('The conversation is off. Turn it on in Settings › Claude Code › Show the conversation on the phone.')));
@@ -711,7 +714,7 @@ W.sessions = {
         }
         box.replaceChildren(...kids);
         const list = box.querySelector('.conv-list');
-        if (list) list.scrollTop = top ?? list.scrollHeight; // a new view starts at the newest message
+        if (list) list.scrollTop = top ?? list.scrollHeight; // a new view starts at the newest message, and keeps up with it
       };
       const load = async () => {
         const mine = ++asked;
@@ -1152,7 +1155,9 @@ W.calendar = {
         const y = now.getFullYear(), m = now.getMonth();
         const first = new Date(y, m, 1), days = new Date(y, m + 1, 0).getDate();
         const lead = (first.getDay() + 6) % 7; // Monday first
-        const cells = ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => h('span', 'cal-h' + (i > 4 ? ' we' : ''), d));
+        const weekday = new Intl.DateTimeFormat(LOCALE, { weekday: 'narrow' });
+        const cells = Array.from({ length: 7 }, (_, i) =>
+          h('span', 'cal-h' + (i > 4 ? ' we' : ''), weekday.format(new Date(2024, 0, i + 1)))); // Monday, Jan 1
         const prevDays = new Date(y, m, 0).getDate();
         for (let i = 0; i < lead; i++) cells.push(h('span', 'cal-d out', prevDays - lead + 1 + i));
         for (let d = 1; d <= days; d++) {
@@ -1429,6 +1434,55 @@ W.note = {
       ta.focus();
     });
     return {};
+  },
+};
+
+// Page buttons: one button per page (the ticked ones, or all), the page you are on highlighted. A tap goes there the
+// same way a rule or a webhook does.
+W.pagebuttons = {
+  bare: true, needs: ['tick'],
+  create(box, { o }) {
+    const list = h('div', 'pgb');
+    if (o.title) box.append(h('div', 'w-title', o.title));
+    box.append(list);
+    let shown = '';
+    const render = () => {
+      const ids = Array.isArray(o.ids) ? o.ids : [];
+      let items = pages.map((p, i) => ({ p, i })).filter(({ p }) => !ids.length || ids.includes(p.id));
+      if (!items.length) items = pages.map((p, i) => ({ p, i })); // the ticked pages are gone: show them all
+      const key = items.map(({ p, i }) => `${i}:${p.id}:${p.icon || ''}:${p.title}`).join('|');
+      if (key !== shown) {
+        shown = key;
+        list.replaceChildren(...items.map(({ p, i }) => {
+          const b = h('button', 'pgb-b', p.icon ? h('span', 'pgb-i', rich(p.icon)) : null, h('span', 'pgb-t', p.title || `${i + 1}`));
+          b.type = 'button';
+          b.dataset.i = i;
+          b.setAttribute('aria-label', `${i + 1} · ${p.title || ''}`);
+          b.onclick = (e) => { e.stopPropagation(); haptic(); gotoPageRef(i + 1); };
+          return b;
+        }));
+      }
+      list.querySelectorAll('.pgb-b').forEach((b) => b.classList.toggle('on', +b.dataset.i === curPage));
+      fit();
+    };
+    // columns for the widget's shape: buttons about twice as wide as tall, with few empty cells
+    let fitted = '';
+    const fit = () => {
+      const n = list.children.length, W = list.clientWidth, H = list.clientHeight;
+      if (!n || !W || !H) return;
+      let best = 1, score = Infinity;
+      for (let cols = 1; cols <= n; cols++) {
+        const rows = Math.ceil(n / cols);
+        const s = Math.abs(Math.log((W / cols) / (H / rows) / 2)) + 0.15 * (cols * rows - n);
+        if (s < score) { score = s; best = cols; }
+      }
+      const value = `repeat(${best}, minmax(0, 1fr))`;
+      if (value !== fitted) { fitted = value; list.style.gridTemplateColumns = value; }
+    };
+    const watch = typeof ResizeObserver === 'function' ? new ResizeObserver(fit) : null;
+    watch?.observe(list);
+    render();
+    return { update: render, destroy() { watch?.disconnect(); } };
   },
 };
 

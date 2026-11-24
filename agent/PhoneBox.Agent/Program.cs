@@ -66,8 +66,10 @@ builder.Services.AddSingleton(usb);
 builder.Services.AddSingleton<AudioControl>();
 builder.Services.AddSingleton<AppCatalog>();
 builder.Services.AddSingleton(_ => new ShortcutIconUploads(Path.Combine(configDir, "icons")));
+builder.Services.AddSingleton(_ => new WallpaperStore(configDir));
 builder.Services.AddSingleton<PairingCodes>();
 builder.Services.AddSingleton<SpotifyControl>();
+builder.Services.AddSingleton<PlexControl>();
 builder.Services.AddSingleton<ControlDeck>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ControlDeck>());
 builder.Services.AddSingleton<PushStore>();
@@ -98,6 +100,8 @@ AddMonitor<ObsMonitor>(builder.Services);
 AddMonitor<DiscordMonitor>(builder.Services);
 builder.Services.AddSingleton<YtMusic>();
 AddMonitor<SteamMonitor>(builder.Services);
+builder.Services.AddSingleton<SteamLibrary>();
+builder.Services.AddSingleton(sp => new LyricsService(sp.GetRequiredService<ConfigStore>(), sp.GetRequiredService<ILogger<LyricsService>>()));
 AddMonitor<BatteryMonitor>(builder.Services);
 AddMonitor<RuleEngine>(builder.Services);
 AddMonitor<ChargeGuard>(builder.Services);
@@ -134,6 +138,22 @@ app.MapPost("/api/controls/spotify/action/{action}", async (string action, strin
         : await spotify.Act(action, id, ct);
     return Results.Json(res);
 });
+app.MapGet("/api/controls/plex/state", async (PlexControl plex, CancellationToken ct) => Results.Json(await plex.Snapshot(ct)));
+app.MapPost("/api/controls/plex/action/{action}", async (string action, string? id, PlexControl plex, ControlDeck deck, CancellationToken ct) =>
+{
+    var res = action is "play-queued" or "playlist"
+        ? await deck.RunWithMediaFocusAsync(async token =>
+        {
+            var result = await plex.Act(action, id, token);
+            if (result.Ok) deck.StopAllRadios();
+            return result;
+        }, ct)
+        : await plex.Act(action, id, ct);
+    return Results.Json(res);
+});
+// settings page only (not in Lan.AllowedOverLan, not gated): Check connection and the playlist picker
+app.MapGet("/api/controls/plex/check", async (PlexControl plex, CancellationToken ct) => Results.Json(await plex.Check(ct)));
+app.MapGet("/api/controls/plex/playlists", async (PlexControl plex, CancellationToken ct) => Results.Json(await plex.Playlists(ct)));
 app.MapGet("/api/controls/spotify/connect", (SpotifyControl spotify) =>
 { try { return Results.Json(new { url = spotify.Begin(), redirectUri = spotify.RedirectUri }); } catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); } });
 app.MapPost("/api/controls/spotify/disconnect", async (SpotifyControl spotify, CancellationToken ct) => { await spotify.Disconnect(ct); return Results.Ok(); });
@@ -252,7 +272,9 @@ app.Use(async (ctx, next) =>
             return;
         }
     }
-    if (ctx.Request.Path.StartsWithSegments("/api/state") && ctx.Request.Headers.ContainsKey("X-PhoneBox-App"))
+    // any request from the app shows the phone is there, not only a state poll: an app on the live stream polls
+    // nothing, and a stream that is not yet (or no longer) open must not hide the phone from a permission prompt (#497)
+    if (ctx.Request.Headers.ContainsKey("X-PhoneBox-App"))
         Interlocked.Exchange(ref ApprovalStore.PhoneLastSeen, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
     if (ctx.Request.Headers.TryGetValue("X-PhoneBox-Device", out var device))
     {
@@ -332,7 +354,7 @@ app.MapGet("/api/lan", (ConfigStore cfg) => Results.Json(new
     fingerprint = lanCert is null ? null : Lan.Fingerprint(lanCert),
 }));
 
-app.MapGet("/api/update", (UpdateService upd, ConfigStore cfg) => Results.Json(new { status = upd.Status(), auto = cfg.Get().Updates.Auto, installed = UpdateService.RunningInstalled }));
+app.MapGet("/api/update", (UpdateService upd, ConfigStore cfg) => Results.Json(new { status = upd.Status(), auto = cfg.Get().Updates.Auto, installed = UpdateService.CanUpdateAgent }));
 // Settings › General: install the phone app on a phone that does not have it yet (local only).
 app.MapPost("/api/phone/install", async (UpdateService upd) =>
     await upd.InstallAppAsync() is { } error ? Results.BadRequest(new { error }) : Results.Ok(new { ok = true }));
@@ -452,6 +474,23 @@ app.MapPost("/api/widget/{pageId}/{widgetId}/note", (string pageId, string widge
     // already holds a Note edit it never checked
     NoteEdit.Result r;
     lock (IconCommit) r = NoteEdit.Apply(cfg, pageId, widgetId, text, expected);
+    return r.Status switch
+    {
+        200 => Results.Ok(new { version = r.Version }),
+        404 => Results.NotFound(new { error = r.Error }),
+        409 => Results.Json(new { error = r.Error }, statusCode: StatusCodes.Status409Conflict),
+        _ => Results.BadRequest(new { error = r.Error }),
+    };
+});
+
+// The phone's other narrow write: a Discord widget's favourite servers and voice channels. Only an id the agent itself
+// reported, only into that widget's two lists (DiscordFavorites). Query string only, like the note above.
+app.MapPost("/api/widget/{pageId}/{widgetId}/discord-favorite", (string pageId, string widgetId, string? kind, string? id, bool? on, string? version, ConfigStore cfg, DiscordMonitor dc) =>
+{
+    // always over the settings the phone has loaded, never over whatever is current
+    if (!long.TryParse(version, out var expected)) return Results.BadRequest(new { error = "version is missing" });
+    DiscordFavorites.Result r;
+    lock (IconCommit) r = DiscordFavorites.Apply(cfg, pageId, widgetId, kind, id, on ?? true, dc.Knows, expected);
     return r.Status switch
     {
         200 => Results.Ok(new { version = r.Version }),
@@ -669,17 +708,21 @@ app.MapGet("/api/discord", (DiscordMonitor dc, ConfigStore cfg) => Results.Json(
     chat = DiscordMonitor.ChatWanted(cfg.Get()),
     chatUnread = dc.ChatUnread(),
 }));
-// Screen share (its own switch, off by default): the state, and the running apps (names only) while the share view is open.
+// Screen share (its own switch, off by default): the state, and the running apps (names only) while
+// the phone's share view is open. It needs a widget's control (the global switch is not enough). code: what went wrong, for the panel to say in its language.
 app.MapGet("/api/discord/share", (bool? apps, DiscordMonitor dc) => Results.Json(dc.Share(apps == true)));
 app.MapPost("/api/discord/share/{action}", async (string action, int? pid, DiscordMonitor dc) =>
     await dc.ShareActAsync(action, pid) is { } e ? Results.BadRequest(new { error = e.Error, code = e.Code }) : Results.Ok(new { ok = true }));
-// Chat (read-only, off by default): the chosen channel's last messages; ?picker=true lists the text channels of ?guild=.
+// Chat (read-only, Settings › General › Discord › chat, off by default): the chosen channel's last messages, the servers
+// or, for the phone's channel picker (?picker=true), no messages but the text channels of ?guild=. Only while the setting
+// is on and a Discord widget is on an enabled page; message text comes from memory only.
 app.MapGet("/api/discord/chat", async (string? guild, bool? picker, DiscordMonitor dc, CancellationToken ct) =>
     Results.Json(await dc.ChatAsync(guild, picker == true, ct)));
 app.MapPost("/api/discord/chat/choose", (string? channel, DiscordMonitor dc) =>
     dc.ChatChoose(channel) is { } error ? Results.BadRequest(new { error }) : Results.Ok(new { ok = true }));
 app.MapPost("/api/discord/chat/open", async (DiscordMonitor dc) =>
     await dc.ChatOpenAsync() is { } error ? Results.BadRequest(new { error }) : Results.Ok(new { ok = true }));
+// Ids go in the query string: the Android app lets image requests through by exact path (READ_ONLY_IMAGES).
 app.MapGet("/api/discord/img", async (string kind, string id, string hash, DiscordMonitor dc, CancellationToken ct) =>
     await dc.ImageAsync(kind, id, hash, ct) is { } img
         ? Results.File(img.Data, img.Type, lastModified: null, entityTag: null, enableRangeProcessing: false) : Results.NotFound());
@@ -713,6 +756,39 @@ app.MapGet("/api/steam", (SteamMonitor steam, ConfigStore cfg) =>
 app.MapGet("/api/steam/avatar", async (string id, SteamMonitor steam, CancellationToken ct) =>
     await steam.AvatarAsync(id, ct) is { } img
         ? Results.File(img.Data, img.Type, lastModified: null, entityTag: null, enableRangeProcessing: false) : Results.NotFound());
+
+// Steam library from Steam's own files on this computer (no API key, no account): installed games, covers, the game
+// being played. Nothing is read while no Steam library widget is on an enabled page.
+app.MapGet("/api/steam/library", (SteamLibrary library) => Results.Json(library.View()));
+// The installed games (id and name) for the widget's favorites picker in settings. Not in Lan.cs: the computer only.
+app.MapGet("/api/steam/games", (SteamLibrary library) => Results.Json(library.Installed()));
+// A cover from Steam's appcache/librarycache, for an installed app id only (SteamLibrary.FindCover checks the path).
+// The id goes in the query string: the Android app lets image requests through by exact path (READ_ONLY_IMAGES).
+app.MapGet("/api/steam/cover", (string? id, SteamLibrary library, HttpResponse res) =>
+{
+    if (library.CoverPath(id) is not { } path) return Results.NotFound();
+    byte[] bytes;
+    try { bytes = File.ReadAllBytes(path); } catch { return Results.NotFound(); }
+    if (bytes.Length > SteamLibrary.MaxCoverBytes) return Results.NotFound();
+    res.Headers.CacheControl = "private, max-age=86400";
+    return Results.File(bytes, path.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? "image/png" : "image/jpeg");
+});
+// Starts an installed game through Steam (steam://rungameid/<id>) for the asking widget ("widget=pageId/widgetId"),
+// only with that widget's "Let the phone start games" on (off by default), like the App console and Dictation.
+app.MapPost("/api/steam/launch", (string? id, string? widget, HttpRequest req, SteamLibrary library) =>
+    library.Launch(req.Headers["X-PhoneBox-Device"].ToString(), widget, id) is { } refused
+        ? Results.BadRequest(new { error = refused.Error, code = refused.Code })
+        : Results.Ok(new { ok = true }));
+// Synced lyrics of the track playing now, from LRCLIB, for the asking widget ("widget=pageId/widgetId"): only when that
+// widget is on an enabled page with "Look up lyrics on LRCLIB" turned on (off by default). The track is the one Now playing
+// shows (the agent's own media snapshot, with PhoneBox's Internet Radio in its place while that plays or is paused, which
+// is never looked up): the phone sends no text that could reach LRCLIB.
+app.MapGet("/api/lyrics", async (string? widget, HttpRequest req, MediaMonitor media, ControlDeck deck, LyricsService lyrics, CancellationToken ct) =>
+{
+    var shown = deck.EffectiveMedia(media.Snapshot());
+    if (shown?.App == "Internet Radio") shown = null;
+    return Results.Json(await lyrics.ForAsync(shown, req.Headers["X-PhoneBox-Device"].ToString(), widget, ct));
+});
 
 // Battery levels of wireless devices (headphones, mice, keyboards…), for the Device batteries widget.
 app.MapGet("/api/batteries", (BatteryMonitor b) => Results.Json(new { devices = b.Snapshot() }));
@@ -749,9 +825,13 @@ app.MapGet("/api/state", (long? ev, HttpContext ctx) => Results.Json(State(ctx.R
 // One "state" frame for all open streams: they wake on the same second (below), so the state is built and serialized once
 // per tick, not once per phone. Everything State() reads is a singleton, so the root provider will do.
 var stateFrames = new StateFrameCache(() => State(app.Services, null), new JsonSerializerOptions(JsonSerializerDefaults.Web));
-app.MapGet("/api/stream", async (HttpContext ctx, PushStore push, SessionMonitor sessions, GitHubMonitor gh, SpectrumAnalyzer spectrum, ILogger<Program> log) =>
+app.MapGet("/api/stream", async (HttpContext ctx, PushStore push, SessionMonitor sessions, GitHubMonitor gh, SpectrumAnalyzer spectrum,
+    IHostApplicationLifetime life, ILogger<Program> log) =>
 {
-    var ct = ctx.RequestAborted;
+    // Ends when the agent begins to stop, too: the server otherwise waits up to 30 s for this never-ending response
+    // before it lets a restart, an update or Quit finish.
+    using var linked = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted, life.ApplicationStopping);
+    var ct = linked.Token;
     var isPhone = ctx.Request.Headers.ContainsKey("X-PhoneBox-App");
     var via = ctx.Connection.LocalPort == usb.Port ? "USB" : ctx.Connection.LocalPort == Port ? "local" : "Wi-Fi";
     log.LogInformation("live stream opened ({Who}, {Via})", isPhone ? "phone" : "other client", via);
@@ -846,7 +926,9 @@ app.MapDelete("/api/claude/hook", (ConfigStore cfg) => ClaudeHook.Configure(fals
 // turns on Settings › Claude Code › "Show the conversation on the phone"; only a session the monitor currently sees.
 app.MapGet("/api/work/conversation", (string id, ConfigStore cfg, SessionMonitor sessions) =>
 {
-    return Results.Json(ClaudeTranscript.ForPhone(cfg.Get().Claude.ShareConversation, sessions.Snapshot(), id));
+    // a session inside WSL keeps its chat file in the distro's home; a distro that stopped is not read (that would start it)
+    var home = sessions.ConversationHome(id, out var usable);
+    return Results.Json(ClaudeTranscript.ForPhone(cfg.Get().Claude.ShareConversation, usable ? sessions.Snapshot() : [], id, home));
 });
 
 // Codex uses the same PermissionRequest decision contract, through ~/.codex/hooks.json.
@@ -880,9 +962,54 @@ app.MapGet("/api/spectrum", (SpectrumAnalyzer spectrum) =>
 app.MapGet("/api/widget/{page}/{widget}", (string page, string widget, bool? force, CommandRunner runner) =>
     runner.Get(page, widget, force == true) is { } r ? Results.Json(r) : Results.NotFound());
 
-app.MapGet("/api/config", (ConfigStore cfg, HttpRequest req, ShortcutIconUploads icons) =>
+app.MapGet("/api/config", (ConfigStore cfg, HttpRequest req, ShortcutIconUploads icons, WallpaperStore wallpaper) =>
     Results.Json(new { version = cfg.Version.ToString(), config = cfg.Get().ToPublic(req.Headers["X-PhoneBox-Device"].ToString(),
-        s => icons.Revision(s.Id) is { } up ? (up, true) : (ShortcutIcons.Revision(s), false)) }));
+        s => icons.Revision(s.Id) is { } up ? (up, true) : (ShortcutIcons.Revision(s), false), wallpaper.Revision()) }));
+
+// The panel's wallpaper (Settings › Display). The panel asks with ?v=<revision>, so the picture may be kept for good.
+app.MapGet("/api/wallpaper", (WallpaperStore wallpaper, HttpResponse res, string? v) =>
+{
+    if (wallpaper.Read() is not { } found) return Results.NotFound();
+    // kept for good only when these very bytes are the revision asked for (the revision is their hash): an upload
+    // between the config and this request must not leave the new picture cached under the old revision's address
+    res.Headers.CacheControl = v == WallpaperStore.ContentRevision(found.Bytes).ToString(System.Globalization.CultureInfo.InvariantCulture)
+        ? "private, max-age=31536000, immutable" : "no-store";
+    res.Headers.XContentTypeOptions = "nosniff";
+    return Results.File(found.Bytes, found.ContentType);
+});
+// Uploading and removing it: under /api/settings, so local only like the rest of the settings API. The version bump
+// tells connected phones to load the config, and with it the new revision.
+app.MapPost("/api/settings/wallpaper", async (HttpRequest req, ConfigStore cfg, WallpaperStore wallpaper) =>
+{
+    var configVersion = req.Headers["X-Config-Version"].ToString();
+    if (cfg.VersionConflict(configVersion)) return Results.Json(new { error = ConfigStore.Conflict }, statusCode: StatusCodes.Status409Conflict);
+    var bytes = await WallpaperStore.ReadBounded(req.Body);
+    lock (IconCommit)
+    {
+        if (cfg.VersionConflict(configVersion)) return Results.Json(new { error = ConfigStore.Conflict }, statusCode: StatusCodes.Status409Conflict);
+        var before = wallpaper.Revision();
+        if (wallpaper.Save(bytes) is { } err)
+        {
+            // a save that failed halfway can still have changed the picture served: the panels must hear of it
+            if (wallpaper.Revision() == before) return Results.BadRequest(new { error = err });
+            cfg.Touch();
+            return Results.Json(new { error = err, version = cfg.VersionText }, statusCode: StatusCodes.Status409Conflict);
+        }
+        cfg.Touch();
+        return Results.Ok(new { version = cfg.VersionText });
+    }
+});
+app.MapDelete("/api/settings/wallpaper", (HttpRequest req, ConfigStore cfg, WallpaperStore wallpaper) =>
+{
+    lock (IconCommit)
+    {
+        if (cfg.VersionConflict(req.Headers["X-Config-Version"])) return Results.Json(new { error = ConfigStore.Conflict }, statusCode: StatusCodes.Status409Conflict);
+        var error = wallpaper.Remove();
+        cfg.Touch(); // also when a file stayed: the panel must load whatever is there now
+        return error is null ? Results.Ok(new { version = cfg.VersionText })
+            : Results.Json(new { error, version = cfg.VersionText }, statusCode: StatusCodes.Status409Conflict);
+    }
+});
 
 // Phones that have talked to this agent, with their settings (Settings › Phones).
 app.MapGet("/api/phones", (ConfigStore cfg) =>
@@ -1022,7 +1149,7 @@ app.Run();
 // Restart requested from the settings page (e.g. Wi-Fi turned on): hand over to a fresh instance.
 single.ReleaseMutex();
 single.Dispose();
-if (AppRestart.Requested && Environment.ProcessPath is { } exe)
+if (AppRestart.Requested && (AppRestart.Executable ?? Environment.ProcessPath) is { } exe)
 {
     if (AppRestart.ServiceManaged(Environment.GetEnvironmentVariable, Environment.ProcessId, AppRestart.ParentName)) Environment.ExitCode = AppRestart.ServiceRestartCode;
     else System.Diagnostics.Process.Start(AppRestart.StartInfo(exe, args));

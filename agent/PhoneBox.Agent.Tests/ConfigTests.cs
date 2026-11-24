@@ -94,6 +94,29 @@ public class ConfigTests
     }
 
     [Fact]
+    public void UnreachableNightScreenIsOffByDefaultAndDelayIsClamped()
+    {
+        var defaults = Load("{}").Display;
+        Assert.False(defaults.NightWhenUnreachable);
+        Assert.Equal(5, defaults.UnreachableNightDelayMin);
+        Assert.Equal(30, Load("""{ "display": { "nightWhenUnreachable": true, "unreachableNightDelayMin": 999 } }""").Display.UnreachableNightDelayMin);
+        Assert.Equal(1, Load("""{ "display": { "nightWhenUnreachable": true, "unreachableNightDelayMin": -5 } }""").Display.UnreachableNightDelayMin);
+        Assert.True(Load("""{ "display": { "nightWhenUnreachable": true } }""").Display.NightWhenUnreachable);
+    }
+
+    [Fact]
+    public void DisplayFinishSoundVolumeDefaultsAndRange()
+    {
+        var defaults = Load("{}").Display;
+        Assert.False(defaults.FinishSound);
+        Assert.Equal(70, defaults.FinishSoundVolume);
+        Assert.Equal(100, Load("""{ "display": { "finishSoundVolume": 999 } }""").Display.FinishSoundVolume);
+        Assert.Equal(10, Load("""{ "display": { "finishSoundVolume": -5 } }""").Display.FinishSoundVolume);
+        Assert.Equal(10, Load("""{ "display": { "finishSoundVolume": 0 } }""").Display.FinishSoundVolume);
+        Assert.Equal(50, Load("""{ "display": { "finishSoundVolume": 50 } }""").Display.FinishSoundVolume);
+    }
+
+    [Fact]
     public void TemplatesExpandIntoWidgets()
     {
         var c = Load("""{ "pages": [ { "template": "music" }, { "template": "music" } ] }""");
@@ -337,6 +360,13 @@ public class LanTests
     [InlineData("/api/steam", true)]
     [InlineData("/api/steam/avatar", true)]
     [InlineData("/api/steam/other", false)]
+    [InlineData("/api/steam/library", true)]
+    [InlineData("/api/steam/cover", true)]
+    [InlineData("/api/steam/launch", true)]
+    [InlineData("/api/steam/library/x", false)]
+    [InlineData("/api/steam/games", false)]
+    [InlineData("/api/lyrics", true)]
+    [InlineData("/api/lyrics/search", false)]
     [InlineData("/api/push/temperature", true)]
     [InlineData("/api/settings", false)]
     [InlineData("/api/pair", false)]
@@ -607,6 +637,33 @@ public class Hour12ConfigTests
             var prop = doc.RootElement.GetProperty("display").GetProperty("hour12");
             Assert.Equal(expectedWrittenKind, prop.ValueKind);
             if (expectedWrittenKind == JsonValueKind.String) Assert.Equal("auto", prop.GetString());
+        }
+        finally
+        {
+            File.Delete(path);
+            File.Delete(path + ".bak");
+        }
+    }
+}
+
+public class PageBarConfigTests
+{
+    [Theory]
+    [InlineData("{}", "dots", "bottom")]
+    [InlineData("""{"display":{"pageBar":"bar","pageBarSide":"left"}}""", "bar", "left")]
+    [InlineData("""{"display":{"pageBar":"auto","pageBarSide":"right"}}""", "auto", "right")]
+    [InlineData("""{"display":{"pageBar":"hidden"}}""", "hidden", "bottom")]
+    [InlineData("""{"display":{"pageBar":"sideways","pageBarSide":"top"}}""", "dots", "bottom")]
+    [InlineData("""{"display":{"pageBar":null,"pageBarSide":null}}""", "dots", "bottom")]
+    public void APageBarSettingThePanelDoesNotKnowIsSavedAsTheDefault(string inputJson, string bar, string side)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"phonebox-pagebar-{Guid.NewGuid():N}.json");
+        try
+        {
+            File.WriteAllText(path, "{}");
+            var store = new ConfigStore(path);
+            Assert.Null(store.Save(inputJson));
+            Assert.Equal((bar, side), (store.Get().Display.PageBar, store.Get().Display.PageBarSide));
         }
         finally
         {
