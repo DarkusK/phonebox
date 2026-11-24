@@ -454,6 +454,8 @@ window.PhoneBoxLocaleData = Object.assign(window.PhoneBoxLocaleData || {}, {
       "Allow controlling the mouse from the phone": "Telefondan farenin kontrolüne izin ver",
       "Allow ending processes from the phone": "Telefondan süreçlerin sonlandırılmasına izin ver",
       "Allow mute, deafen, leave and joining from the phone": "Telefondan sessizleştirme, defafen, ayrılma ve katılmaya izin ver",
+      "Side by side: the current channel with call buttons, and channels, chat and screen share": "Bulunduğun kanal, arama düğmeleri, kanallar, sohbet ve ekran paylaşımı yan yana",
+      "Servers and their channels in a list": "Sunucular ve kanalları bir listede",
       "Allow recording, streaming and scene switching from the phone": "Telefondan kayıt, akış ve sahne değiştirme izin ver",
       "Allow start / stop / restart from the phone": "Telefondan başlatma / durdurma / yeniden başlatmaya izin ver",
       "Allow switching from the phone": "Telefondan geçiş yapmaya izin ver",

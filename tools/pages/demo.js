@@ -711,7 +711,9 @@
       if (!dcShare(await config())) return json({ enabled: false });
       // the agent reads it as a bool: anything but true or false is refused, as ASP.NET does
       if (q.has('apps') && !/^(true|false)$/i.test(q.get('apps'))) return json({}, 400);
-      return json({ enabled: true, ready: true, inCall: !!dc.in, active: !!dc.sharing, name: dc.sharing,
+      // the name of what is shared only with the app list, as the agent does (DiscordMonitor.Share)
+      const withApps = /^true$/i.test(q.get('apps') || '');
+      return json({ enabled: true, ready: true, inCall: !!dc.in, active: !!dc.sharing, name: withApps ? dc.sharing : null,
         apps: /^true$/i.test(q.get('apps') || '') ? [{ pid: 4242, name: 'Space Racers' }, { pid: 77, name: 'Firefox' }, { pid: 91, name: 'Visual Studio Code' }] : null });
     }
     if (path.startsWith('/api/discord/share/') && method === 'POST') {
