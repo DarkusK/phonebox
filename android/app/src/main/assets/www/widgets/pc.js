@@ -577,7 +577,7 @@ W['discord-bar'] = {
       hide(false);
       const quiet = { ...s, members: s.members.map(({ speaking, ...m }) => m), notifications: null };
       const live = !!share?.active;
-      const key = JSON.stringify([quiet, data.control, busy, live, share?.name, data.chat, data.chatUnread, shareBusy]);
+      const key = JSON.stringify([quiet, data.control, busy, live, share?.name, data.share, data.chat, data.chatUnread, shareBusy]);
       if (!force && key === lastKey) { for (const m of s.members) rings.get(m.id)?.classList.toggle('speaking', !!m.speaking); return; }
       lastKey = key;
       rings.clear();
@@ -594,13 +594,17 @@ W['discord-bar'] = {
         if (ctl && !busy) b.addEventListener('click', () => act(kind)); else b.disabled = true;
         return b;
       };
-      // while sharing: a red button that stops it (a share starts only from the big widget, where the window is picked)
+      // Stream: opens the big widget's share tab (the window is picked there); while sharing it turns red and stops it
       let stop = null;
       if (live) {
         const label = dcL('Stop sharing', 'Остановить трансляцию');
-        stop = labelled(h('button', 'dcb-btn share' + (shareBusy ? ' busy' : ''), icon('screen-share-off'), h('span', 'dcb-l', dcL('Stop', 'Стоп'))), label);
+        stop = labelled(h('button', 'dcb-btn share live' + (shareBusy ? ' busy' : ''), icon('screen-share-off'), h('span', 'dcb-l', dcL('Stop', 'Стоп'))), label);
         if (!shareBusy) stop.addEventListener('click', async () => { haptic(); shareBusy = true; render(true); await dcShareAct('stop'); shareBusy = false; await loadShare(); render(true); });
         else stop.disabled = true;
+      } else if (data.share) {
+        const label = dcL('Stream', 'Стрим');
+        stop = labelled(h('button', 'dcb-btn share', icon('screen-share'), h('span', 'dcb-l', label)), dcL('Start a screen share', 'Начать трансляцию'));
+        stop.addEventListener('click', () => { haptic(); dcOpen('share'); });
       }
       let chatB = null;
       if (data.chat) {

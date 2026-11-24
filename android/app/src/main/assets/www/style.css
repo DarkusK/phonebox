@@ -1174,7 +1174,7 @@ html.beat-4 .obs-pill.on .obs-led { box-shadow: 0 0 34px rgba(239, 68, 68, .9); 
 .dcb-head .dcf-badge { flex: none; }
 .dcb-sub { font-size: 13px; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dcb-btn { position: relative; }
-.dcb-btn.share { background: #f23f43; }
+.dcb-btn.share.live { background: #f23f43; }
 .dcb-dot { position: absolute; top: 2px; right: 2px; width: 12px; height: 12px; border-radius: 50%; background: #f23f43; box-shadow: 0 0 0 2px #5865f2; }
 /* less room: Sound goes first, then Chat, then Stop (Mic and Leave stay) */
 @container (max-width: 640px) { .dcb-btns.n5 .dcb-btn.deafen { display: none; } }
