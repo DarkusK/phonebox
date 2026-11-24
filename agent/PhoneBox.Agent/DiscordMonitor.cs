@@ -768,7 +768,10 @@ public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMo
     internal static readonly string[] BarActions = ["mute", "deafen", "leave"];
 
     /// <summary>A Discord widget or the current-channel bar with the control option on, on a page that is enabled: the global switch does not count.</summary>
-    public static bool WidgetControl(AgentConfig cfg) => Control(cfg, "discord") || Control(cfg, "discord-bar");
+    public static bool WidgetControl(AgentConfig cfg) => Control(cfg, "discord");
+
+    /// <summary>The current-channel bar with its Control on: mute, deafen, leave and stopping a share, nothing else.</summary>
+    public static bool BarControl(AgentConfig cfg) => Control(cfg, "discord-bar");
 
     private static bool Control(AgentConfig cfg, string type) =>
         cfg.Widgets(enabledPagesOnly: true).Any(w => w.Type == type && w.Bool("control") == true);

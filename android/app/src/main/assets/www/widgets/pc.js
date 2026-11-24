@@ -369,7 +369,7 @@ const dcFocus = {
       const here = s.channelId ? s.channels.find((c) => c.id === s.channelId) : null;
       if (s.channelId !== seenChannel) {
         seenChannel = s.channelId;
-        if (here) { sel = dcGid(here); dcRecent(sel); store.set('dc-last', { id: here.id, name: here.name, guild: here.guild || '' }); }
+        if (here) { sel = dcGid(here); dcRecent(sel); store.set('dc-last', { id: here.id }); }
       }
       if (!sel || !servers.has(sel)) sel = dcRecent().find((g) => servers.has(g)) || servers.keys().next().value || null;
       const sname = (gid) => servers.get(gid)?.[0]?.guild || t('w.discord.otherServer');
@@ -403,10 +403,11 @@ const dcFocus = {
           live ? h('div', 'dcf-hint', share.name ? t('w.discord.sharing', { name: share.name }) : t('w.discord.sharingNow')) : null,
           ptt());
       } else {
-        const last = store.get('dc-last', null);
-        // like the channel tiles, the way back follows the Channels option
-        const back = o.channels !== false && last && s.channels.some((c) => c.id === last.id)
-          ? h('button', 'dcf-back', icon('rotate-ccw'), h('span', null, t('w.discord.backTo', { name: last.name + (last.guild ? ' · ' + last.guild : '') }))) : null;
+        // only the id is kept on the phone; the name comes from the list Discord sends. Like the channel tiles, the way
+        // back follows the Channels option.
+        const lastId = store.get('dc-last', null)?.id;
+        const last = o.channels !== false && lastId ? s.channels.find((c) => c.id === lastId) : null;
+        const back = last ? h('button', 'dcf-back', icon('rotate-ccw'), h('span', null, t('w.discord.backTo', { name: last.name + (last.guild ? ' · ' + last.guild : '') }))) : null;
         if (back) { if (joinCtl && !busy) back.addEventListener('click', () => act('join', last.id)); else back.disabled = true; }
         mid = h('div', 'dcf-empty', h('span', 'dcf-eico', icon('volume-x')), h('div', 'dcf-name', t('w.discord.notInChannel')),
           h('div', 'dcf-hint', t('w.discord.tapToJoin')), back);
@@ -539,20 +540,32 @@ W['discord-bar'] = {
       await load(); busy = null; render(true);
     };
     const hide = (v) => { if (box.hidden !== v) { box.hidden = v; reflow?.(); } };
+    // It hides only on a page grid that can give its rows away (a Smart Stack card has no reflow), never in the
+    // settings' live preview, and only once the agent has answered, so it doesn't blink away while the page loads.
+    const canHide = o.autoHide !== false && !!reflow && !PREVIEW;
+    // Out of a channel it was showing (or Discord reconnecting for a moment) it waits a little before it hides, so the
+    // widgets around it don't jump for a blip.
+    const GRACE = 3000;
+    let shownIn = false, awaySince = 0;
     const render = (force = false) => {
       const s = data?.snapshot;
       if (!s?.channelId || !data.enabled || !s.connected) {
+        if (canHide && data) {
+          if (!shownIn) { lastKey = ''; hide(true); return; }
+          awaySince ||= Date.now();
+          if (Date.now() - awaySince < GRACE) return; // keep what is drawn for now
+          shownIn = false; lastKey = ''; hide(true); return;
+        }
         lastKey = '';
-        // hide only once the agent has answered, so the bar doesn't blink away while the page loads
-        if (o.autoHide !== false && data) { hide(true); return; }
         hide(false);
         box.replaceChildren(h('div', 'empty', !data ? t('w.loading') : !data.enabled ? t('w.discord.turnOn') : !s.connected ? (s.error || t('panel.connecting')) : t('w.discord.notInChannel')));
         return;
       }
+      shownIn = true; awaySince = 0;
       hide(false);
       const live = !!share?.active;
       const quiet = { ...s, members: s.members.map(({ speaking, ...m }) => m), notifications: null };
-      const key = JSON.stringify([quiet, data.control, data.share, data.chat, data.chatUnread, busy, live, share?.name, shareBusy]);
+      const key = JSON.stringify([quiet, data.control, data.share, data.shareState, data.chat, data.chatUnread, busy, live, share?.name, shareBusy]);
       if (!force && key === lastKey) { for (const m of s.members) rings.get(m.id)?.classList.toggle('speaking', !!m.speaking); return; }
       lastKey = key;
       rings.clear();
@@ -586,7 +599,7 @@ W['discord-bar'] = {
       const btns = [btn('mute'), btn('deafen'), screen, chatB, btn('leave')].filter(Boolean);
       box.replaceChildren(h('div', 'dcb' + (live ? ' live' : ''),
         h('div', 'dcb-info',
-          h('div', 'dcb-head', icon('volume-2', 'dcb-vi'), h('b', 'dcb-name', s.channelName || ''), live ? dcLive() : null, here?.guild ? h('span', 'dcb-guild', here.guild) : null),
+          h('div', 'dcb-head', icon('volume-2', 'dcb-vi'), h('b', 'dcb-name', s.channelName || ''), live ? h('span', 'dcb-badge', t('w.discord.live')) : null, here?.guild ? h('span', 'dcb-guild', here.guild) : null),
           live && share.name ? h('div', 'dcb-sub', t('w.discord.sharing', { name: share.name })) : null,
           h('div', 'dcb-chips', ...chips),
           h('div', 'dcb-stack', ...stack, s.members.length > 5 ? h('span', 'dcb-av dcb-more', '+' + (s.members.length - 5)) : null)),
@@ -604,14 +617,17 @@ W['discord-bar'] = {
     };
     // the share state every 4 s while in a call, for the Live badge and the stop button
     const pollShare = () => {
-      if (!data?.share || !data.snapshot?.channelId) { share = null; return; }
+      // shareState: the bar's own Control is enough to see whether you share and to stop it
+      if (!(data?.shareState ?? data?.share) || !data.snapshot?.channelId) { share = null; return; }
       if (shareWaiting || shareBusy || !visible() || Date.now() < shareNext) return;
       shareNext = Date.now() + 4000;
       loadShare().then(() => render());
     };
-    return { update: (kind) => { poll(); pollShare(); if (kind !== 'fast') render(); } };
+    // 'fast' also counts down the grace period before hiding
+    return { update: (kind) => { poll(); pollShare(); if (kind !== 'fast' || awaySince) render(); } };
   },
 };
+
 
 // Discord through the desktop app on the PC: the voice channel / call you are in, who is there, mute / deafen / leave,
 // voice channels to join and recent notifications. Buttons only work when the widget allows control.

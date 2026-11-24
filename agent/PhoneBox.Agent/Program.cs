@@ -705,6 +705,7 @@ app.MapGet("/api/discord", (DiscordMonitor dc, ConfigStore cfg) => Results.Json(
     control = DiscordMonitor.ControlAllowed(cfg.Get()),
     // join and input mode: not allowed by the current-channel bar's option alone (it shows only mute, deafen and leave)
     joinControl = DiscordMonitor.ControlAllowed(cfg.Get(), "join"),
+    shareState = DiscordMonitor.ShareStateWanted(cfg.Get()),
     share = DiscordMonitor.ShareWanted(cfg.Get()),
     widgetControl = DiscordMonitor.WidgetControl(cfg.Get()),
     chat = DiscordMonitor.ChatWanted(cfg.Get()),

@@ -36,7 +36,7 @@ public sealed partial class DiscordMonitor
 
     /// <summary>The chat answers only while its setting is on and a Discord widget is on an enabled page.</summary>
     internal static bool ChatWanted(AgentConfig cfg) =>
-        cfg.Discord is { Enabled: true, Chat: true } && cfg.Widgets(enabledPagesOnly: true).Any(w => w.Type is "discord" or "discord-bar");
+        cfg.Discord is { Enabled: true, Chat: true } && cfg.Widgets(enabledPagesOnly: true).Any(w => w.Type == "discord");
 
     private bool ChatOn => _granted.Contains(ChatScope) && ChatWanted(config.Get());
 

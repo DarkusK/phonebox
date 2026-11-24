@@ -1345,6 +1345,7 @@ html.beat-4 .obs-pill.on .obs-led { box-shadow: 0 0 34px rgba(239, 68, 68, .9); 
 /* Discord current-channel bar. Wide: names and labelled buttons; narrower: round icon buttons, then stacked
    avatars, then only the name and the buttons; two rows tall or more: stacked, the buttons in a row at the bottom. */
 .w-discord-bar { background: #5865f2; border-color: #5865f2; color: #fff; }
+.dcb-badge { flex: none; display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: #f23f43; color: #fff; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
 .w-discord-bar[hidden] { display: none; }
 .w-discord-bar .empty { color: rgba(255, 255, 255, .8); }
 .dcb { height: 100%; box-sizing: border-box; display: flex; align-items: center; gap: 16px; padding: 0 18px; }

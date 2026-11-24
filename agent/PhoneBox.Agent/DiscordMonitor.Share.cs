@@ -22,6 +22,8 @@ public sealed partial class DiscordMonitor
 {
     /// <summary>The most apps listed.</summary>
     internal const int ShareAppsMax = 30;
+    /// <summary>Discord's builds on Windows: the process name and the folder under %LOCALAPPDATA% that holds its Update.exe.</summary>
+    internal static readonly (string Process, string Folder)[] DiscordBuilds = [("Discord", "Discord"), ("DiscordPTB", "DiscordPTB"), ("DiscordCanary", "DiscordCanary")];
     /// <summary>How long a direct share may take to start before the phone is told to use the picker.</summary>
     internal TimeSpan ShareStartWait = TimeSpan.FromSeconds(4); // internal: tests wait less
     internal int ShareAppsCacheMs = 10_000; // internal: tests make it old
@@ -60,6 +62,9 @@ public sealed partial class DiscordMonitor
     /// <see cref="DiscordConfig.AllowControl"/> is not enough: it is for the voice actions only.
     /// </summary>
     internal static bool ShareWanted(AgentConfig cfg) => cfg.Discord is { Enabled: true, ScreenShare: true } && WidgetControl(cfg);
+
+    /// <summary>Whether you share, for the current-channel bar's Live badge and Stop: the Discord widget's or the bar's Control.</summary>
+    internal static bool ShareStateWanted(AgentConfig cfg) => cfg.Discord is { Enabled: true, ScreenShare: true } && (WidgetControl(cfg) || BarControl(cfg));
 
     private bool ShareGranted => !ShareScopes.Except(_granted).Any();
     private bool ShareOn => !_shareRefused && ShareGranted && config.Get().Discord is { Enabled: true, ScreenShare: true };
@@ -167,7 +172,8 @@ public sealed partial class DiscordMonitor
     /// <summary>What the phone's share view shows. Apps are listed only when <paramref name="apps"/> is asked (the view is open), at most every 10 s.</summary>
     public object Share(bool apps)
     {
-        if (!ShareWanted(config.Get())) return new { enabled = false };
+        if (!ShareStateWanted(config.Get())) return new { enabled = false };
+        apps = apps && ShareWanted(config.Get()); // the bar alone gets the state, never the apps
         var s = _snap;
         if (!s.Connected || !ShareOn) return new { enabled = true, ready = false, refused = _shareRefused, error = s.Error };
         bool old;
@@ -176,11 +182,13 @@ public sealed partial class DiscordMonitor
         lock (_lock)
         {
             // turned off (or disconnected) while the apps were read: their names are neither kept nor sent
-            if (!ShareWanted(config.Get())) return new { enabled = false };
+            if (!ShareStateWanted(config.Get())) return new { enabled = false };
             if (!ShareOn || !_snap.Connected) return new { enabled = true, ready = false, refused = _shareRefused, error = _snap.Error };
             if (list is not null) { _shareApps = list; _shareAppsAt = Environment.TickCount64; }
             if (_sharing == true && _shareName is null) _sharePicked = _shareApps.FirstOrDefault(a => a.Pid == _sharePid)?.Name ?? _sharePicked;
-            return new { enabled = true, ready = true, inCall = s.ChannelId is not null, active = _sharing, name = _shareName ?? _sharePicked, apps = apps ? _shareApps.ToList() : null,
+            return new { enabled = true, ready = true, inCall = s.ChannelId is not null, active = _sharing,
+                // the name of what is shared goes with the share view only, like the app list (PRIVACY.md)
+                name = apps ? _shareName ?? _sharePicked : null, apps = apps ? _shareApps.ToList() : null,
                 gamesOnly = config.Get().Discord.ShareGamesOnly };
         }
     }
@@ -257,17 +265,26 @@ public sealed partial class DiscordMonitor
 #if WINDOWS
             try
             {
-                if (WindowsDeckNative.Focus("Discord")) return;
-                // in the tray it has no window to raise: starting it again shows the running one (Discord stays single-instance)
-                var update = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Discord", "Update.exe");
-                if (!File.Exists(update)) return;
-                var start = new System.Diagnostics.ProcessStartInfo(update) { UseShellExecute = false, CreateNoWindow = true };
-                start.ArgumentList.Add("--processStart");
-                start.ArgumentList.Add("Discord.exe");
-                // It hands over to the running Discord and exits at once; one that hangs is not left behind.
-                using var updater = System.Diagnostics.Process.Start(start);
-                if (updater is not null && !updater.WaitForExit(TimeSpan.FromSeconds(15)))
-                    try { updater.Kill(); } catch { } // exited meanwhile
+                foreach (var (process, folder) in DiscordBuilds)
+                {
+                    var running = Process.GetProcessesByName(process);
+                    var any = running.Length > 0;
+                    foreach (var p in running) p.Dispose();
+                    if (!any) continue;
+                    if (WindowsDeckNative.Focus(process)) return;
+                    // In the tray it has no window to raise: starting it again from its own Update.exe shows the running
+                    // one (Discord stays single-instance). A fixed path; nothing from the request.
+                    var update = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), folder, "Update.exe");
+                    if (!File.Exists(update)) return;
+                    var start = new ProcessStartInfo(update) { UseShellExecute = false, CreateNoWindow = true };
+                    start.ArgumentList.Add("--processStart");
+                    start.ArgumentList.Add(process + ".exe");
+                    // it hands over to the running Discord and exits at once; one that hangs is not left behind
+                    using var updater = Process.Start(start);
+                    if (updater is not null && !updater.WaitForExit(TimeSpan.FromSeconds(15)))
+                        try { updater.Kill(); } catch { } // exited meanwhile
+                    return;
+                }
             }
             catch (Exception ex) { log.LogInformation("discord: could not bring Discord forward ({Msg})", ex.Message); }
 #endif
@@ -276,7 +293,8 @@ public sealed partial class DiscordMonitor
         DiscordShareError? Refusal()
         {
             var cfg = config.Get();
-            if (!WidgetControl(cfg)) return new("control", "controlling Discord is turned off in the widget's settings");
+            // the current-channel bar may only stop a share; starting one needs the Discord widget's own Control
+            if (!WidgetControl(cfg) && !(action == "stop" && BarControl(cfg))) return new("control", "controlling Discord is turned off in the widget's settings");
             if (!cfg.Discord.ScreenShare) return new("off", "screen share is turned off");
             return ShareOn ? null : new("notAllowed", "Discord has not allowed PhoneBox to share the screen");
         }
