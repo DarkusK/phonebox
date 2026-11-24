@@ -132,3 +132,16 @@ test('a redraw keeps the scrolled place on the right side', async ({ page }) => 
   await expect(page.locator('.dcf-call.mute')).toHaveClass(/\bon\b/);
   expect(await page.locator('.dcf-right').evaluate((el) => el.scrollTop)).toBe(before);
 });
+
+test('leaving the share tab for the server list drops the shared app name too', async ({ page }) => {
+  await show(page);
+  await page.locator('.dcf-call.share').click();
+  await page.locator('.dcf-app', { hasText: 'Space Racers' }).click();
+  await expect(page.locator('.dcf-livebox')).toContainText('Space Racers');
+  await page.locator('.dcf-switch').click();
+  await expect(page.locator('.dcf-srv').first()).toBeVisible();
+  await expect(page.locator('.dcf-left')).not.toContainText('Space Racers');
+  // and stays gone through the next state polls
+  await page.waitForTimeout(4500);
+  await expect(page.locator('.dcf-left')).not.toContainText('Space Racers');
+});
