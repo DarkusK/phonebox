@@ -11,7 +11,7 @@ public sealed record BackseatMember(int Id, string Name, bool Me, bool Streaming
 public sealed record BackseatRoom(string Code, string Label, bool Open, bool Background);
 /// <param name="Viewers">Only the viewers' names: their network numbers stay on the computer.</param>
 public sealed record BackseatLive(long SinceSecs, string? Quality, string? Encoder, string? SourceKind, bool Background,
-    IReadOnlyList<string> Viewers);
+    IReadOnlyList<string> Viewers, long? SourceId = null);
 public sealed record BackseatWatch(int Streamer, string? Name, bool Muted, int? Volume, bool Fullscreen);
 /// <param name="State">ok; off (Backseat's remote control is off, or Backseat was never started); down (Backseat is
 /// not running or not answering); token (Backseat refused the token).</param>
@@ -185,7 +185,8 @@ public sealed class BackseatMonitor(ConfigStore config, ILogger<BackseatMonitor>
             var liveRoom = Str(l["room"]);
             live = new(Long(l["since_secs"]) ?? 0, Str(l["quality"]), Str(l["encoder"]), Str(l["settings"]?["source"]?["kind"]),
                 liveRoom is not null && liveRoom != code,
-                (l["viewers"] as JsonArray ?? []).OfType<JsonObject>().Select(v => Str(v["name"])).OfType<string>().ToList());
+                (l["viewers"] as JsonArray ?? []).OfType<JsonObject>().Select(v => Str(v["name"])).OfType<string>().ToList(),
+                Long(l["settings"]?["source"]?["id"]));
         }
         var watching = (s?["watching"] as JsonArray ?? []).OfType<JsonObject>()
             .Where(w => Int(w["streamer"]) is not null)
@@ -194,7 +195,8 @@ public sealed class BackseatMonitor(ConfigStore config, ILogger<BackseatMonitor>
         return new("ok", null, Bool(s?["joining"]), Bool(s?["reconnecting"]) || Bool(room?["reconnecting"]),
             code, Str(room?["title"]), members, inVoice, inVoice && code is not null && Str(voice?["room"]) == code,
             Bool(voice?["mic_muted"]), Bool(voice?["deafened"]), Bool(voice?["push_to_talk"]),
-            live, watching, rooms.Select(r => r with { Open = r.Code == code }).ToList(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            // the room list gives the open room's code as its label when it has no saved name: the status knows its title
+            live, watching, rooms.Select(r => r with { Open = r.Code == code, Label = r.Code == code && r.Label == r.Code && Str(room?["title"]) is { } t ? t : r.Label }).ToList(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
     }
 
     private static string? Str(JsonNode? n) => n is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
@@ -217,7 +219,8 @@ public sealed class BackseatMonitor(ConfigStore config, ILogger<BackseatMonitor>
         foreach (var w in (json?["windows"] as JsonArray ?? []).OfType<JsonObject>())
             if (Long(w["id"]) is { } id && !Bool(w["minimized"]))
                 list.Add(new("window", id, Str(w["title"]) ?? Str(w["exe"]) ?? "Window", Str(w["exe"]), false));
-        return (list, null);
+        // the main screen first, then the other screens, then the windows as Backseat lists them
+        return ([.. list.OrderBy(s => s.Kind == "monitor" ? (s.Primary ? 0 : 1) : 2)], null);
     }
 
     /// <summary>Runs a button; null when done, else what went wrong. The status Backseat answers with is taken as the new state.</summary>

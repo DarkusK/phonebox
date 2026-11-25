@@ -87,7 +87,7 @@ public sealed class BackseatTests : IDisposable
             string answer;
             if (auth != "Bearer " + Token) { ctx.Response.StatusCode = 401; answer = "{\"ok\":false,\"error\":\"token\"}"; }
             else if (path == "/api/v1/rooms")
-                answer = "{\"ok\":true,\"rooms\":[{\"code\":\"K7M2Q9XR4TBA\",\"label\":\"Evening games\",\"open\":true},{\"code\":\"Duo night\",\"label\":\"Duo night\",\"open\":false}]}";
+                answer = "{\"ok\":true,\"rooms\":[{\"code\":\"K7M2Q9XR4TBA\",\"label\":\"K7M2Q9XR4TBA\",\"open\":true},{\"code\":\"Duo night\",\"label\":\"Duo night\",\"open\":false}]}";
             else if (path == "/api/v1/rooms/Duo night/open") { _openRoom = "Duo night"; answer = Status(); }
             else if (path == "/api/v1/voice/join") { _inVoice = true; answer = Status(); }
             else if (path == "/api/v1/live/start") { ctx.Response.StatusCode = 409; answer = "{\"ok\":false,\"error\":\"already live\"}"; }
@@ -115,6 +115,9 @@ public sealed class BackseatTests : IDisposable
         Assert.Equal(["Maria"], s.Live.Viewers);
         Assert.Equal(2, s.Rooms.Count);
         Assert.True(s.Rooms[0].Open);
+        // a room saved without a name: the open one is called by its title, as in the app
+        Assert.Equal("Evening games", s.Rooms[0].Label);
+        Assert.Equal(65537, s.Live.SourceId);
         lock (_calls) Assert.All(_calls, c => Assert.Equal("Bearer " + Token, c.Auth));
         // neither the token nor the signaling server reaches the phone
         var json = JsonSerializer.Serialize(s);

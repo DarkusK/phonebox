@@ -679,7 +679,7 @@
         else if (a === 'voice-join') bs.voice = true;
         else if (a === 'voice-leave') bs.voice = false;
         else if (a === 'join') { bs.room = q.get('room'); bs.voice = true; }
-        else if (a === 'live-start') bs.live = bs.live || { at: now() };
+        else if (a === 'live-start') bs.live = { at: bs.live?.at ?? now(), kind: q.get('kind') || 'monitor', id: +(q.get('source') || 1) };
         else if (a === 'live-stop') bs.live = null;
         else if (a === 'watch') bs.watching = { streamer: id, muted: false, fullscreen: false };
         else if (a === 'unwatch') bs.watching = null;
@@ -696,7 +696,7 @@
           { id: 16, name: 'Oleg', me: false, streaming: false, watching: false, inVoice: true, speaking: false, micMuted: true, deafened: false, volume: 100 },
           { id: 17, name: 'Kate', me: false, streaming: false, watching: false, inVoice: false, speaking: false, micMuted: false, deafened: false, volume: null }] : [],
         inVoice: bs.voice && !!bs.room, voiceHere: bs.voice && !!bs.room, micMuted: bs.muted || bs.deaf, deafened: bs.deaf, pushToTalk: false,
-        live: bs.live ? { sinceSecs: Math.floor((now() - bs.live.at) / 1000) + 754, quality: '1080p60 20000', encoder: 'AV1 · NVENC', sourceKind: 'monitor', background: false, viewers: ['Maria', 'Oleg'] } : null,
+        live: bs.live ? { sinceSecs: Math.floor((now() - bs.live.at) / 1000) + 754, quality: '1080p60 20000', encoder: 'AV1 · NVENC', sourceKind: bs.live.kind, sourceId: bs.live.id, background: false, viewers: ['Maria', 'Oleg'] } : null,
         watching: bs.watching ? [{ ...bs.watching, name: 'Maria', volume: 100 }] : [],
         rooms: rooms.map(([code, label]) => ({ code, label, open: code === bs.room, background: false })), updated: now() } });
     }

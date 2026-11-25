@@ -760,9 +760,10 @@ W.backseat = {
       out.push(h('div', 'dcf-shint', s.live ? bsL('Switch the stream to (viewers stay)', 'Переключить стрим на (зрители останутся)') : bsL('What to stream', 'Что стримить')));
       out.push(h('div', 'dcf-grid', ...sources.map((src) => {
         const label = src.kind === 'monitor' ? (src.primary ? bsL('Main screen', 'Основной экран') : src.name) : src.name;
-        const b = h('button', 'dcf-app' + (busy === 'live-start' + src.id ? ' busy' : ''), h('span', 'dcf-appi', icon(src.kind === 'monitor' ? 'monitor' : 'app-window')),
+        const cur = s.live && !s.live.background && s.live.sourceKind === src.kind && s.live.sourceId === src.id;
+        const b = h('button', 'dcf-app' + (cur ? ' cur' : '') + (busy === 'live-start' + src.id ? ' busy' : ''), h('span', 'dcf-appi', icon(src.kind === 'monitor' ? 'monitor' : 'app-window')),
           h('span', 'bs-src', h('b', null, label), src.detail ? h('small', null, src.detail) : null));
-        if (!busy) b.addEventListener('click', () => act('live-start', { kind: src.kind, source: src.id }, 25000)); else b.disabled = true;
+        if (!busy && !cur) b.addEventListener('click', () => act('live-start', { kind: src.kind, source: src.id }, 25000)); else if (busy) b.disabled = true;
         return b;
       })));
       return out;

@@ -42,6 +42,8 @@ test('going live from the stream tab, then stopping', async ({ page }) => {
   await expect(w.locator('.dcf-livebox')).toContainText('1080p60');
   await expect(w.locator('.dcf-livebox')).toContainText('Maria, Oleg');
   await expect(w.locator('.dcf-call.share')).toHaveClass(/live/);
+  // what is streamed now is marked, and the others switch the stream
+  await expect(w.locator('.dcf-app.cur')).toHaveText(/Path of Exile/);
   await w.locator('.dcf-stop').click();
   await expect(w.locator('.dcf-livebox')).toHaveCount(0);
 });
