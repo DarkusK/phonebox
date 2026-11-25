@@ -98,6 +98,7 @@ AddMonitor<CalendarMonitor>(builder.Services);
 AddMonitor<DockerMonitor>(builder.Services);
 AddMonitor<ObsMonitor>(builder.Services);
 AddMonitor<DiscordMonitor>(builder.Services);
+AddMonitor<BackseatMonitor>(builder.Services);
 builder.Services.AddSingleton<YtMusic>();
 AddMonitor<SteamMonitor>(builder.Services);
 builder.Services.AddSingleton<SteamLibrary>();
@@ -641,6 +642,17 @@ app.MapGet("/api/docker", async (DockerMonitor docker, CancellationToken ct) =>
     Results.Json(new { snapshot = await docker.SnapshotAsync(ct), control = docker.ControlAllowed() }));
 app.MapPost("/api/docker/{id}/{action}", async (string id, string action, DockerMonitor docker) =>
     await docker.ActAsync(id, action) is { } error ? Results.BadRequest(new { error }) : Results.Ok(new { ok = true }));
+// local tweak: Backseat (voice rooms and game streaming) through its local API; the token stays on this computer.
+app.MapGet("/api/backseat", async (BackseatMonitor bs, ConfigStore cfg, CancellationToken ct) => Results.Json(new
+{
+    snapshot = await bs.SnapshotAsync(ct),
+    control = BackseatMonitor.ControlAllowed(cfg.Get()),
+    widgetControl = BackseatMonitor.WidgetControl(cfg.Get()),
+}));
+app.MapGet("/api/backseat/sources", async (BackseatMonitor bs, CancellationToken ct) =>
+    await bs.SourcesAsync(ct) is var (sources, error) && sources is not null ? Results.Json(new { sources }) : Results.BadRequest(new { error }));
+app.MapPost("/api/backseat/{action}", async (string action, int? id, string? room, string? kind, long? source, BackseatMonitor bs) =>
+    await bs.ActAsync(action, id, room, kind, source) is { } error ? Results.BadRequest(new { error }) : Results.Ok(new { ok = true }));
 
 // Home Assistant (widget): states of the entities the widgets list, and switching those a widget allows.
 app.MapGet("/api/ha/states", async (string? ids, HomeAssistant ha) =>

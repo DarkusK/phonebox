@@ -1985,3 +1985,28 @@ body.controls-top .ap-foot { order: -1; margin-bottom: 4px; }
 .ly-note[hidden] { display: none; }
 .w-lyrics:not(.timed):not(.plain) .ly-note { margin: auto; }
 .ly-credit { position: absolute; right: 10px; top: 9px; font-size: 9px; letter-spacing: .1em; color: var(--dim); }
+
+/* local tweak: Backseat, in the Discord side by side and bar look (dcf-* / dcb-*), with Backseat's own colour on the bar */
+.w-backseat { padding: 0; display: flex; flex-direction: column; }
+.w-backseat-bar { --bs: #1f8f6a; background: var(--bs); border-color: var(--bs); color: #fff; }
+.w-backseat-bar[hidden] { display: none; }
+.w-backseat-bar .empty { color: rgba(255, 255, 255, .8); }
+.w-backseat-bar .dcb-stack .dcb-av { border-color: var(--bs); }
+.w-backseat-bar .dcb-chip.speaking .dcb-av, .w-backseat-bar .dcb-av.speaking { box-shadow: 0 0 0 2px var(--bs), 0 0 0 4px #7cf0b8; }
+.dcf-chip.bs-away { opacity: .55; }
+.dcf-chip .bs-ci { width: 16px; height: 16px; flex: none; color: #f23f43; }
+.bs-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: #f23f43; }
+.dcf-call.bs-join .dcf-disc { background: #23a55a; }
+.dcf-call.bs-join:disabled .dcf-disc { background: #2b2f3a; color: #6b7080; }
+.bs-watch { gap: 8px; }
+.bs-watch > span:not(.dcf-av):not(.dcf-badge) { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bs-watch > .dcf-badge { flex: none; }
+.bs-src { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.bs-src b, .bs-src small { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bs-src small { font-size: 12px; color: var(--muted); }
+.bs-wbtn { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 44px; padding: 0 14px; border-radius: 12px; border: none; background: rgba(255, 255, 255, .1); color: inherit; font: inherit; font-size: 14px; }
+.bs-wbtn .ico { width: 18px; height: 18px; flex: none; opacity: 1; }
+.bs-wbtn.on { background: #fff; color: #1a1c22; }
+.bs-wbtn.busy { opacity: .55; }
+.bs-wbtn:disabled { opacity: .5; }
+@container (max-width: 700px) { .bs-wbtn span { display: none; } .bs-wbtn { width: 44px; padding: 0; justify-content: center; } }

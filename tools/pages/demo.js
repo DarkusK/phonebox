@@ -244,6 +244,8 @@
   let muteKeys = ['mute']; // ids of the shortcuts whose command is builtin:mute; their state is the computer's
 
   // made-up OBS: streaming for a while, buttons and scenes work
+  // local tweak: Backseat (BackseatMonitor)
+  const bs = { room: 'K7M2', voice: true, muted: false, deaf: false, live: null, watching: null };
   const dc = { muted: false, deaf: false, in: 'c1', sharing: null, chatIn: null, chatSeen: false, noteAt: now() - 60000 }; // a fixed time, as the agent's notifications have
   const obs = { streamingSince: now() - 754e3, recordingSince: 0, paused: false, scene: 'Desk', mic: false };
   function obsState() {
@@ -660,6 +662,43 @@
           people: lounge ? [{ id: '4', name: 'Grace', muted: false, deafened: false }, { id: '5', name: 'Alan', muted: true, deafened: false }] : null },
           { id: 'c2', name: 'Stand-up', guild: 'Work', guildId: 'g2' }],
         notifications: [{ ts: dc.noteAt, title: 'Ada', body: 'are you joining?' }] } });
+    }
+    if (path === '/api/backseat' || path === '/api/backseat/sources' || (path.startsWith('/api/backseat/') && method === 'POST')) {
+      const c = await config();
+      const on = (t) => shownWidgets(c).some((w) => w.type === t && w.options?.control === true);
+      const widgetControl = on('backseat');
+      const control = widgetControl || on('backseat-bar');
+      if (path === '/api/backseat/sources') return widgetControl ? json({ sources: [{ kind: 'monitor', id: 1, name: 'DISPLAY1', detail: '2560×1440', primary: true },
+        { kind: 'monitor', id: 2, name: 'DISPLAY2', detail: '1920×1080', primary: false }, { kind: 'window', id: 11, name: 'Path of Exile', detail: 'PathOfExileSteam.exe' },
+        { kind: 'window', id: 12, name: 'Elden Ring', detail: 'eldenring.exe' }] }) : json({ error: 'turned off' }, 400);
+      if (method === 'POST') {
+        const a = path.slice('/api/backseat/'.length), id = +q.get('id');
+        if (!(widgetControl || (control && ['mute', 'deafen', 'voice-leave', 'live-stop'].includes(a)))) return json({ error: 'control from the phone is turned off in the widget’s settings' }, 400);
+        if (a === 'mute') { if (bs.deaf) { bs.deaf = false; bs.muted = false; } else bs.muted = !bs.muted; }
+        else if (a === 'deafen') bs.deaf = !bs.deaf;
+        else if (a === 'voice-join') bs.voice = true;
+        else if (a === 'voice-leave') bs.voice = false;
+        else if (a === 'join') { bs.room = q.get('room'); bs.voice = true; }
+        else if (a === 'live-start') bs.live = bs.live || { at: now() };
+        else if (a === 'live-stop') bs.live = null;
+        else if (a === 'watch') bs.watching = { streamer: id, muted: false, fullscreen: false };
+        else if (a === 'unwatch') bs.watching = null;
+        else if (a === 'watch-mute' && bs.watching) bs.watching.muted = !bs.watching.muted;
+        else if (a === 'watch-full' && bs.watching) bs.watching.fullscreen = !bs.watching.fullscreen;
+        return json({ ok: true });
+      }
+      const rooms = [['K7M2', 'Evening games'], ['DUO1', 'Duo night'], ['RAID', 'Raid crew']];
+      const here = rooms.find((r) => r[0] === bs.room);
+      const talk = Math.floor(now() / 1500) % 2 === 0;
+      return json({ control, widgetControl, snapshot: { state: 'ok', error: null, joining: false, reconnecting: false, roomCode: bs.room, roomTitle: here?.[1] ?? null,
+        members: bs.room ? [{ id: 12, name: 'demo', me: true, streaming: !!bs.live, watching: false, inVoice: bs.voice, speaking: false, micMuted: bs.muted || bs.deaf, deafened: bs.deaf, volume: null },
+          { id: 15, name: 'Maria', me: false, streaming: true, watching: bs.watching?.streamer === 15, inVoice: true, speaking: talk, micMuted: false, deafened: false, volume: 100 },
+          { id: 16, name: 'Oleg', me: false, streaming: false, watching: false, inVoice: true, speaking: false, micMuted: true, deafened: false, volume: 100 },
+          { id: 17, name: 'Kate', me: false, streaming: false, watching: false, inVoice: false, speaking: false, micMuted: false, deafened: false, volume: null }] : [],
+        inVoice: bs.voice && !!bs.room, voiceHere: bs.voice && !!bs.room, micMuted: bs.muted || bs.deaf, deafened: bs.deaf, pushToTalk: false,
+        live: bs.live ? { sinceSecs: Math.floor((now() - bs.live.at) / 1000) + 754, quality: '1080p60 20000', encoder: 'AV1 · NVENC', sourceKind: 'monitor', background: false, viewers: ['Maria', 'Oleg'] } : null,
+        watching: bs.watching ? [{ ...bs.watching, name: 'Maria', volume: 100 }] : [],
+        rooms: rooms.map(([code, label]) => ({ code, label, open: code === bs.room, background: false })), updated: now() } });
     }
     if (path === '/api/steam') return json({ enabled: true, snapshot: {
       connected: true, error: null, totalFriends: 2, onlineCount: 1, updated: now(),

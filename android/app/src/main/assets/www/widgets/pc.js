@@ -652,6 +652,320 @@ W['discord-bar'] = {
 };
 
 
+// ---- local tweak: Backseat (voice rooms and game streaming, github.com/ArtemNA/backseat) ----
+// The same look as the Discord side by side layout and bar (dcf-* / dcb-* in style.css). The agent talks to Backseat's
+// local API on the PC (BackseatMonitor); the phone never sees its token.
+const bsL = dcL;
+// Backseat mutes the microphone while you are deafened, so the mic shows off then too
+const bsCall = (kind, s) => {
+  const on = kind === 'mute' ? s.micMuted || s.deafened : kind === 'deafen' ? s.deafened : false;
+  const ic = kind === 'mute' ? (on ? 'mic-off' : 'mic') : kind === 'deafen' ? (on ? 'headphone-off' : 'headphones') : 'log-out';
+  const label = kind === 'mute' ? (on ? bsL('Mic off', 'Микр. выкл') : bsL('Mic', 'Микрофон'))
+    : kind === 'deafen' ? (on ? bsL('Sound off', 'Звук выкл') : bsL('Sound', 'Звук')) : bsL('Leave voice', 'Выйти');
+  return { on, ic, label };
+};
+// Why there is nothing to show: Backseat's remote control off, Backseat not running, the token refused.
+const bsDown = (s) => s.state === 'off' ? bsL('Turn on Backseat › Settings › Remote control', 'Включите в Backseat: Настройки › Remote control')
+  : s.state === 'token' ? bsL('Backseat refused the token: restart PhoneBox agent', 'Backseat не принял токен: перезапустите агент PhoneBox')
+  : s.error || bsL('Backseat is not running on the PC', 'Backseat не запущен на ПК');
+// A button, with a deadline over the request and its answer (opening a room can take up to 30 s in Backseat). Never sent
+// again by itself (mute and deafen toggle); the caller reads the state afresh instead.
+const bsPost = async (action, params = {}, ms = 15000) => {
+  const q = Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&');
+  const ctl = new AbortController();
+  let timer;
+  const deadline = new Promise((_, fail) => { timer = setTimeout(() => { ctl.abort(); fail(new Error('timeout')); }, ms); });
+  try {
+    await Promise.race([deadline, (async () => {
+      const r = await fetch(`${API}/backseat/${action}` + (q ? '?' + q : ''), { method: 'POST', cache: 'no-store', headers: PANEL_HEADERS, signal: ctl.signal });
+      if (!r.ok) toast((await r.json().catch(() => ({}))).error || bsL('Backseat did not do it', 'Backseat не выполнил действие'), 'err');
+    })()]);
+  } catch (_) { toast(t('panel.pcNoAnswer'), 'err'); } finally { clearTimeout(timer); }
+};
+const bsUptime = (secs) => {
+  const s = Math.max(0, Math.floor(secs || 0)), hh = Math.floor(s / 3600), mm = Math.floor(s / 60) % 60, ss = s % 60;
+  return (hh ? hh + ':' + String(mm).padStart(2, '0') : mm) + ':' + String(ss).padStart(2, '0');
+};
+const bsLive = () => h('span', 'dcf-badge', bsL('Live', 'В эфире'));
+// The bar asks the Backseat widget to open a tab, as the Discord bar does (dcOpen / dcTake)
+let bsWant = null;
+const bsOpen = (tab) => {
+  const target = pages.find((p) => (p.widgets || []).some((w) => w.type === 'backseat'));
+  if (!target) { toast(bsL('Add the Backseat widget to a page', 'Добавьте виджет Backseat на страницу'), 'err'); return; }
+  bsWant = { tab, page: target };
+  gotoPageRef(pages.indexOf(target) + 1);
+};
+const bsTake = (page, shown) => {
+  if (!bsWant || bsWant.page !== page || !shown) return null;
+  const { tab } = bsWant;
+  bsWant = null;
+  return tab;
+};
+
+// Left: the room you are in, who is there (a ring while they speak, a Live badge while they stream) and round call
+// buttons; right: tabs for your saved rooms, your stream and the streams of the others.
+W.backseat = {
+  needs: ['tick', 'fast'],
+  create(box, { page }) {
+    box.classList.add('dcf');
+    let data = null, lastKey = '', busy = null, tab = 'rooms', lastView = '';
+    let sources = null, sourcesAt = 0, sourcesWaiting = false;
+    const load = async () => { try { data = await api('/backseat', undefined, 5000); } catch (_) {} };
+    const act = async (action, params, ms) => {
+      if (busy) return; // one press at a time: a double tap must not toggle twice
+      haptic();
+      busy = action + (params?.id ?? params?.room ?? params?.source ?? ''); render(true);
+      await bsPost(action, params, ms);
+      await load(); busy = null; render(true);
+    };
+    const loadSources = async () => {
+      if (sourcesWaiting || !data?.widgetControl) return;
+      sourcesWaiting = true;
+      try { sources = (await api('/backseat/sources', undefined, 8000)).sources; sourcesAt = Date.now(); } catch (_) {} finally { sourcesWaiting = false; }
+    };
+    const openTab = (to) => {
+      tab = to;
+      // window titles only while the stream tab is open: leaving it forgets them
+      if (to === 'live') { sources = null; loadSources().then(() => render(true)); } else sources = null;
+      render(true);
+    };
+    const visible = () => dcVisible(box, page);
+    const note = (text) => h('div', 'dcf-note', text);
+    const rings = new Map();
+    const ring = () => { for (const m of data?.snapshot?.members || []) rings.get(m.id)?.classList.toggle('speaking', !!m.speaking); };
+
+    const roomsPanel = (s, ctl) => {
+      if (!s.rooms.length) return [note(bsL('No saved rooms: add one in Backseat (Join / invite link)', 'Нет сохранённых комнат: добавьте их в Backseat (Join / ссылка-приглашение)'))];
+      return [h('div', 'dcf-cap', bsL('Your rooms', 'Ваши комнаты')), h('div', 'dcf-grid', ...s.rooms.map((r) => {
+        const here = r.code === s.roomCode;
+        const b = h('button', 'dcf-chan' + (here ? ' cur' : '') + (busy === 'join' + r.code ? ' busy' : ''), icon(here && s.voiceHere ? 'volume-2' : 'hash'), h('span', null, r.label));
+        // a tap opens the room and joins its voice, as a channel tile in Discord does
+        if (ctl && !busy && !(here && s.voiceHere)) b.addEventListener('click', () => act('join', { room: r.code }, 45000));
+        return b;
+      }))];
+    };
+
+    const livePanel = (s, ctl) => {
+      const out = [];
+      if (!s.roomCode) return [note(bsL('Open a room to go live', 'Откройте комнату, чтобы начать стрим'))];
+      if (s.live) {
+        const stop = h('button', 'dcf-stop' + (busy === 'live-stop' ? ' busy' : ''), icon('screen-share-off'), h('span', null, bsL('Stop', 'Остановить')));
+        if (ctl && !busy) stop.addEventListener('click', () => act('live-stop')); else stop.disabled = true;
+        const viewers = s.live.viewers.length ? bsL('Watching: ', 'Смотрят: ') + s.live.viewers.join(', ') : bsL('Nobody is watching yet', 'Пока никто не смотрит');
+        out.push(h('div', 'dcf-livebox', bsLive(), h('div', 'dcf-lt', h('b', null, bsUptime(s.live.sinceSecs) + (s.live.quality ? ' · ' + s.live.quality : '')),
+          h('small', null, [s.live.encoder, viewers].filter(Boolean).join(' · '))), stop));
+      }
+      if (!data.widgetControl) { out.push(note(bsL('Allow control in the widget settings to choose what to stream', 'Разрешите управление в настройках виджета, чтобы выбирать, что стримить'))); return out; }
+      if (!sources) { out.push(note(t('w.loading'))); return out; }
+      out.push(h('div', 'dcf-shint', s.live ? bsL('Switch the stream to (viewers stay)', 'Переключить стрим на (зрители останутся)') : bsL('What to stream', 'Что стримить')));
+      out.push(h('div', 'dcf-grid', ...sources.map((src) => {
+        const label = src.kind === 'monitor' ? (src.primary ? bsL('Main screen', 'Основной экран') : src.name) : src.name;
+        const b = h('button', 'dcf-app' + (busy === 'live-start' + src.id ? ' busy' : ''), h('span', 'dcf-appi', icon(src.kind === 'monitor' ? 'monitor' : 'app-window')),
+          h('span', 'bs-src', h('b', null, label), src.detail ? h('small', null, src.detail) : null));
+        if (!busy) b.addEventListener('click', () => act('live-start', { kind: src.kind, source: src.id }, 25000)); else b.disabled = true;
+        return b;
+      })));
+      return out;
+    };
+
+    const watchPanel = (s, ctl) => {
+      const live = s.members.filter((m) => m.streaming && !m.me);
+      if (!live.length) return [note(bsL('Nobody in the room is live', 'Сейчас в комнате никто не стримит'))];
+      return [h('div', 'dcf-cap', bsL('Live in the room', 'В эфире в комнате')), h('div', 'dcf-plist', ...live.map((m) => {
+        const w = s.watching.find((x) => x.streamer === m.id);
+        const btn = (action, ic, label, on) => {
+          const b = labelled(h('button', 'bs-wbtn' + (on ? ' on' : '') + (busy === action + m.id ? ' busy' : ''), icon(ic), h('span', null, label)), label);
+          if (ctl && !busy) b.addEventListener('click', () => act(action, { id: m.id }, 25000)); else b.disabled = true;
+          return b;
+        };
+        return h('div', 'dcf-prow bs-watch' + (w ? ' cur' : ''), dcIco(null, m.name, 'dcf-av'), h('span', null, m.name), bsLive(),
+          w ? btn('watch-mute', w.muted ? 'volume-x' : 'volume-2', w.muted ? bsL('Sound off', 'Звук выкл') : bsL('Sound', 'Звук'), w.muted) : null,
+          w ? btn('watch-full', 'monitor', bsL('Full screen', 'Во весь экран'), w.fullscreen) : null,
+          w ? btn('unwatch', 'x', bsL('Stop watching', 'Не смотреть')) : btn('watch', 'eye', bsL('Watch', 'Смотреть')));
+      }))];
+    };
+
+    const renderFocus = (s, ctl) => {
+      let mid;
+      if (s.roomCode) {
+        const voice = s.members.filter((m) => m.inVoice), away = s.members.filter((m) => !m.inVoice);
+        const chip = (m) => {
+          const c = h('span', 'dcf-chip' + (m.speaking ? ' speaking' : '') + (m.deafened ? ' deaf' : m.micMuted ? ' muted' : '') + (m.inVoice ? '' : ' bs-away'),
+            dcIco(null, m.name, 'dcf-av'), h('span', null, m.name + (m.me ? ' ' + bsL('(you)', '(вы)') : '')),
+            m.deafened ? icon('headphone-off', 'bs-ci') : m.micMuted ? icon('mic-off', 'bs-ci') : null, m.streaming ? h('span', 'bs-dot') : null);
+          rings.set(m.id, c);
+          return c;
+        };
+        const status = s.reconnecting ? bsL('Reconnecting…', 'Переподключение…') : s.joining ? bsL('Joining…', 'Подключение…') : null;
+        mid = h('div', 'dcf-now', h('span', 'dcf-label', s.voiceHere ? bsL('Voice chat', 'Голосовой чат') : bsL('Room', 'Комната'), s.live && !s.live.background ? bsLive() : null),
+          h('div', 'dcf-name', s.roomTitle || s.roomCode),
+          h('div', 'dcf-chips', ...voice.map(chip)),
+          away.length ? h('div', 'dcf-hint', bsL('In the room, not in voice: ', 'В комнате, не в голосе: ') + away.map((m) => m.name).join(', ')) : null,
+          status ? h('div', 'dcf-hint', status) : null,
+          s.inVoice && !s.voiceHere ? h('div', 'dcf-hint', bsL('Your voice is in another room', 'Ваш голос в другой комнате')) : null);
+      } else {
+        mid = h('div', 'dcf-empty', h('span', 'dcf-eico', icon('volume-x')), h('div', 'dcf-name', s.joining ? bsL('Joining…', 'Подключение…') : bsL('Not in a room', 'Не в комнате')),
+          h('div', 'dcf-hint', bsL('Pick a room on the right', 'Выберите комнату справа')));
+      }
+      const call = (kind, action = kind) => {
+        const { on, ic, label } = bsCall(kind, s);
+        const b = labelled(h('button', `dcf-call ${kind}` + (on ? ' on' : '') + (busy === action ? ' busy' : ''), h('span', 'dcf-disc', icon(ic)), h('span', 'dcf-cl', label)), label);
+        if (ctl && !busy) b.addEventListener('click', () => act(action)); else b.disabled = true;
+        return b;
+      };
+      // outside voice the last button joins the open room's voice instead of leaving it
+      const voiceBtn = () => {
+        if (s.inVoice) return call('leave', 'voice-leave');
+        const label = bsL('Join voice', 'В голос');
+        const b = labelled(h('button', 'dcf-call bs-join' + (busy === 'voice-join' ? ' busy' : ''), h('span', 'dcf-disc', icon('phone')), h('span', 'dcf-cl', label)), label);
+        if (ctl && !busy && s.roomCode) b.addEventListener('click', () => act('voice-join')); else b.disabled = true;
+        return b;
+      };
+      const liveNow = !!(s.live && !s.live.background);
+      const streamBtn = () => {
+        const label = liveNow ? bsL('Live', 'В эфире') : bsL('Stream', 'Стрим');
+        const b = labelled(h('button', 'dcf-call share' + (tab === 'live' ? ' sel' : '') + (liveNow ? ' live' : ''), h('span', 'dcf-disc', icon('screen-share')), h('span', 'dcf-cl', label)), label);
+        b.addEventListener('click', () => { haptic(); openTab(tab === 'live' ? 'rooms' : 'live'); });
+        return b;
+      };
+      const calls = [call('mute'), call('deafen'), streamBtn(), voiceBtn()];
+      const left = h('div', 'dcf-left', mid, h('div', 'dcf-calls many', ...calls));
+      const othersLive = s.members.some((m) => m.streaming && !m.me);
+      const tabs = h('div', 'dcf-tabs', ...[['rooms', bsL('Rooms', 'Комнаты')], ['live', bsL('My stream', 'Мой стрим')], ['watch', bsL('Streams', 'Стримы')]].map(([k, label]) => {
+        const b = h('button', 'dcf-tab' + (tab === k ? ' on' : ''), label, (k === 'live' && liveNow) || (k === 'watch' && othersLive && tab !== 'watch') ? h('span', 'dcf-dot') : null);
+        b.addEventListener('click', () => { haptic(); openTab(k); });
+        return b;
+      }));
+      const right = h('div', 'dcf-right', tabs, ...(tab === 'live' ? livePanel(s, ctl) : tab === 'watch' ? watchPanel(s, ctl) : roomsPanel(s, ctl)));
+      const view = tab;
+      const places = view === lastView ? ['.dcf-wrap', '.dcf-right', '.dcf-plist'].map((q) => box.querySelector(q)?.scrollTop ?? 0) : [0, 0, 0];
+      lastView = view;
+      box.replaceChildren(h('div', 'dcf-wrap', left, right));
+      ['.dcf-wrap', '.dcf-right', '.dcf-plist'].forEach((q, i) => { const el = box.querySelector(q); if (el) el.scrollTop = places[i]; });
+    };
+
+    const render = (force = false) => {
+      const want = bsTake(page, visible());
+      if (want) { openTab(want); return; }
+      const s0 = data?.snapshot;
+      // who is speaking and the stream's clock change all the time: they only move the rings / the clock already drawn
+      const quiet = s0 ? { ...data, snapshot: { ...s0, updated: 0, members: (s0.members || []).map(({ speaking, ...m }) => m), live: s0.live && { ...s0.live, sinceSecs: Math.floor(s0.live.sinceSecs / 5) } } } : data;
+      const key = JSON.stringify([quiet, busy, tab, sources, box.clientWidth, box.clientHeight]);
+      if (!force && key === lastKey) { ring(); return; }
+      lastKey = key;
+      rings.clear();
+      if (!data) { box.replaceChildren(h('div', 'empty', t('w.loading'))); return; }
+      const s = data.snapshot;
+      if (s.state !== 'ok') { box.replaceChildren(h('div', 'empty', bsDown(s))); return; }
+      renderFocus(s, data.control);
+    };
+    // in voice every 500 ms (the speaking ring), otherwise every 2 s; off screen not at all
+    let next = 0, asking = false, shown = false;
+    const poll = () => {
+      const now = visible();
+      if (now && !shown) next = 0;
+      shown = now;
+      if (asking || !now || Date.now() < next) return;
+      asking = true;
+      load().then(() => { asking = false; next = Date.now() + (data?.snapshot?.inVoice ? 500 : 2000); render(); });
+    };
+    // the windows to stream change: read again every 5 s while the stream tab is open
+    const pollSources = () => { if (tab === 'live' && visible() && Date.now() - sourcesAt > 5000) loadSources().then(() => render()); };
+    return { update: (kind) => { poll(); pollSources(); if (kind !== 'fast') render(); } };
+  },
+};
+
+// The Backseat voice room you are in as a bar any page can hold, as the Discord bar: the room, who is in voice and
+// mic / sound / stream / leave. Outside voice it hides and the widgets next to it take its cells (reflowPage in main.js).
+W['backseat-bar'] = {
+  needs: ['tick', 'fast'],
+  create(box, { o, page, reflow }) {
+    let data = null, lastKey = '', busy = null;
+    const rings = new Map();
+    const load = async () => { try { data = await api('/backseat', undefined, 5000); } catch (_) {} };
+    const act = async (action) => {
+      if (busy) return;
+      haptic();
+      busy = action; render(true);
+      await bsPost(action);
+      await load(); busy = null; render(true);
+    };
+    let destroyed = false;
+    const hide = (v) => { if (!destroyed && box.hidden !== v) { box.hidden = v; reflow?.(); } };
+    const canHide = o.autoHide !== false && !!reflow && !PREVIEW;
+    const GRACE = 3000;
+    let shownIn = false, awaySince = 0;
+    if (canHide) { box.hidden = true; queueMicrotask(() => { if (!destroyed) reflow(); }); }
+    const render = (force = false) => {
+      const s = data?.snapshot;
+      if (!s || s.state !== 'ok' || !s.inVoice) {
+        if (canHide) {
+          if (!data) return;
+          if (!shownIn) { lastKey = ''; hide(true); return; }
+          awaySince ||= Date.now();
+          if (Date.now() - awaySince < GRACE) return;
+          shownIn = false; lastKey = ''; hide(true); return;
+        }
+        lastKey = '';
+        hide(false);
+        box.replaceChildren(h('div', 'empty', !s ? t('w.loading') : s.state !== 'ok' ? bsDown(s) : bsL('Not in voice', 'Не в голосовом чате')));
+        return;
+      }
+      shownIn = true; awaySince = 0;
+      hide(false);
+      const live = !!s.live;
+      const members = s.members.filter((m) => m.inVoice);
+      const quiet = { ...s, updated: 0, members: members.map(({ speaking, ...m }) => m), live: !!s.live, rooms: null };
+      const key = JSON.stringify([quiet, data.control, busy]);
+      if (!force && key === lastKey) { for (const m of members) rings.get(m.id)?.classList.toggle('speaking', !!m.speaking); return; }
+      lastKey = key;
+      rings.clear();
+      const ctl = data.control;
+      const av = (m) => dcIco(null, m.name, 'dcb-av');
+      const chips = members.map((m) => h('span', 'dcb-chip' + (m.speaking ? ' speaking' : ''), av(m), h('span', null, m.name)));
+      const stack = members.slice(0, 5).map((m) => { const a = av(m); if (m.speaking) a.classList.add('speaking'); return a; });
+      members.forEach((m, i) => rings.set(m.id, { classList: { toggle: (c, v) => { chips[i].classList.toggle(c, v); stack[i]?.classList.toggle(c, v); } } }));
+      const btn = (kind, action = kind) => {
+        const { on, ic, label } = bsCall(kind, s);
+        const b = labelled(h('button', `dcb-btn ${kind}` + (on ? ' on' : '') + (busy === action ? ' busy' : ''), icon(ic), h('span', 'dcb-l', label)), label);
+        if (ctl && !busy) b.addEventListener('click', () => act(action)); else b.disabled = true;
+        return b;
+      };
+      let screen;
+      if (live) {
+        const label = bsL('Stop stream', 'Остановить стрим');
+        screen = labelled(h('button', 'dcb-btn share live' + (busy === 'live-stop' ? ' busy' : ''), icon('screen-share-off'), h('span', 'dcb-l', label)), label);
+        if (ctl && !busy) screen.addEventListener('click', () => act('live-stop')); else screen.disabled = true;
+      } else {
+        const label = bsL('Stream', 'Стрим');
+        screen = labelled(h('button', 'dcb-btn share', icon('screen-share'), h('span', 'dcb-l', label)), label);
+        screen.addEventListener('click', () => { haptic(); bsOpen('live'); });
+      }
+      const btns = [btn('mute'), btn('deafen'), screen, btn('leave', 'voice-leave')];
+      const room = s.rooms.find((r) => r.code === s.roomCode);
+      box.replaceChildren(h('div', 'dcb' + (live ? ' live' : ''),
+        h('div', 'dcb-info',
+          h('div', 'dcb-head', icon('volume-2', 'dcb-vi'), h('b', 'dcb-name', s.roomTitle || room?.label || s.roomCode || ''), live ? h('span', 'dcb-badge', bsL('Live', 'В эфире')) : null,
+            !s.voiceHere ? h('span', 'dcb-guild', bsL('voice in another room', 'голос в другой комнате')) : null),
+          h('div', 'dcb-chips', ...chips),
+          h('div', 'dcb-stack', ...stack, members.length > 5 ? h('span', 'dcb-av dcb-more', '+' + (members.length - 5)) : null)),
+        h('div', 'dcb-btns n' + btns.length, ...btns)));
+    };
+    const visible = () => dcVisible(box, page);
+    let next = 0, asking = false, shown = false;
+    const poll = () => {
+      const now = visible();
+      if (now && !shown) next = 0;
+      shown = now;
+      if (asking || !now || Date.now() < next) return;
+      asking = true;
+      load().then(() => { asking = false; next = Date.now() + (data?.snapshot?.inVoice ? 500 : 2000); render(); });
+    };
+    return { update: (kind) => { if (destroyed) return; poll(); if (kind !== 'fast' || awaySince) render(); }, destroy: () => { destroyed = true; } };
+  },
+};
+
+
 // Discord through the desktop app on the PC: the voice channel / call you are in, who is there, mute / deafen / leave,
 // voice channels to join and recent notifications. Buttons only work when the widget allows control.
 W.discord = {
